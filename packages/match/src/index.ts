@@ -12,7 +12,7 @@ export {
   tournament,
 } from './time-control.js';
 
-export type { ClockState, TimeGift } from './clock.js';
+export type { ClockState, TimeGift, Urgency } from './clock.js';
 export {
   ClockError,
   createClock,
@@ -26,6 +26,8 @@ export {
   startTurn,
   stop,
   tick,
+  URGENCY,
+  urgencyOf,
 } from './clock.js';
 
 export type {
@@ -38,8 +40,10 @@ export type {
   Permission,
 } from './offers.js';
 export {
+  ABORT_BEFORE_PLY,
   OFFER_POLICIES,
   OfferError,
+  canAbort,
   accept,
   canOffer,
   createOffers,
@@ -51,3 +55,9 @@ export {
 
 export type { GiftPolicy } from './gifts.js';
 export { GIFT_POLICIES, canGive } from './gifts.js';
+
+export type { Premove, PremoveOutcome } from './premove.js';
+export { canPremove, resolvePremove } from './premove.js';
+
+export type { Aids, DisplaySettings } from './settings.js';
+export { DEFAULT_SETTINGS, visibleAids } from './settings.js';

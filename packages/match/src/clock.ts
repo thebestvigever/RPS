@@ -258,3 +258,33 @@ export function giveTime(clock: ClockState, gift: TimeGift): ClockState {
 export function giftedMs(clock: ClockState, side: Side): number {
   return clock.gifts.reduce((total, gift) => (gift.to === side ? total + gift.ms : total), 0);
 }
+
+export type Urgency = 'normal' | 'low' | 'critical';
+
+/**
+ * Thresholds are the SMALLER of a fixed time and a share of the starting
+ * clock. A flat "warn at 30 seconds" is useless in a 1+0 game, where thirty
+ * seconds is half of everything you have and the warning would be on from the
+ * first move.
+ */
+export const URGENCY = {
+  lowMs: 30_000,
+  lowShare: 0.2,
+  criticalMs: 10_000,
+  criticalShare: 0.1,
+} as const;
+
+export function urgencyOf(clock: ClockState, side: Side, now: number): Urgency {
+  if (clock.control.unlimited) return 'normal';
+
+  const initial = clock.control.stages[0]?.baseMs ?? 0;
+  if (initial <= 0) return 'normal';
+
+  const remaining = remainingAt(clock, side, now);
+  const critical = Math.min(URGENCY.criticalMs, initial * URGENCY.criticalShare);
+  const low = Math.min(URGENCY.lowMs, initial * URGENCY.lowShare);
+
+  if (remaining <= critical) return 'critical';
+  if (remaining <= low) return 'low';
+  return 'normal';
+}

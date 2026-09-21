@@ -4,6 +4,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   applyMove,
+  canHoldSeal,
   createGame,
   fromFen,
   getVariant,
@@ -451,5 +452,42 @@ describe('the starting position (spec 2.3)', () => {
 
   it('round-trips through the position notation', () => {
     expect(toFen(state)).toBe(original.start);
+  });
+});
+
+describe('a Keep can be forced open (there is no passing)', () => {
+  // Vig's case: the sealing side's only piece is the one standing on its own
+  // corner. Its turn comes, it has to move, and the corner opens. `isSealed`
+  // says true; the seal is one move from gone.
+  const loneKeep = '9/9/9/4S4/9/9/9/9/r8 blue';
+
+  it('reports the corner sealed, because right now it is', () => {
+    const state = load(loneKeep);
+    expect(isPermanent(state, parseSquare('a1'))).toBe(true);
+    expect(isSealed(state, 'blue')).toBe(true);
+  });
+
+  it('cannot hold it, because every legal move abandons the corner', () => {
+    const state = load(loneKeep);
+    expect(canHoldSeal(state, 'blue')).toBe(false);
+    for (const text of moveTexts(state)) {
+      expect(isSealed(play(state, text), 'blue')).toBe(false);
+    }
+  });
+
+  it('holds it when there is another piece to move instead', () => {
+    // The same Keep, with a spare Blue Rock that can shuffle harmlessly.
+    const state = load('9/9/9/4S4/9/9/9/6r2/r8 blue');
+    expect(isSealed(state, 'blue')).toBe(true);
+    expect(canHoldSeal(state, 'blue')).toBe(true);
+  });
+
+  it('says nothing is forcing a side that is not to move', () => {
+    const state = load('9/9/9/4S4/9/9/9/9/r8 red');
+    expect(canHoldSeal(state, 'blue')).toBe(true);
+  });
+
+  it('is false wherever the corner is not sealed at all', () => {
+    expect(canHoldSeal(createGame(original), 'blue')).toBe(false);
   });
 });

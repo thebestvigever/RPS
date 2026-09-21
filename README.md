@@ -16,7 +16,7 @@ runs. The board UI is next. See `docs/BUILD_PLAN.md`.
 
 ```sh
 pnpm install
-pnpm test        # 263 passing
+pnpm test        # 286 passing
 pnpm typecheck
 pnpm dev         # placeholder home screen
 pnpm build

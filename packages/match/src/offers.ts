@@ -153,3 +153,24 @@ export function onMove(state: OfferState): OfferState {
   if (!state.pending || state.pending.kind === 'rematch') return state;
   return { ...state, pending: null };
 }
+
+/**
+ * A game can be abandoned during the first two plies — before either side has
+ * really started — and then it counts for nothing (`aborted`). After that,
+ * leaving is a resignation.
+ *
+ * Lichess draws the line in the same place, and for the same reason: a
+ * misclicked "new game" should not become a loss, but neither should "abort"
+ * be an escape hatch from a position going badly.
+ */
+export const ABORT_BEFORE_PLY = 2;
+
+export function canAbort(ply: number, mode: MatchMode): Permission {
+  if (mode === 'pass-and-play') {
+    // One device, one person: they can simply start another game.
+    return { ok: true };
+  }
+  return ply < ABORT_BEFORE_PLY
+    ? { ok: true }
+    : { ok: false, reason: 'the game has started — resign instead' };
+}

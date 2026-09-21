@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createGame, fromFen, getVariant, isSealed, resign } from '@sps/engine';
+import { canHoldSeal, createGame, fromFen, getVariant, isSealed, resign } from '@sps/engine';
 import type { GameState } from '@sps/engine';
 import { DRAW_MIN_PLY, shouldAcceptDraw } from '../src/draw.js';
 
@@ -13,16 +13,30 @@ describe('answering a draw offer', () => {
     expect(decision.reason).toMatch(/too early/);
   });
 
-  it('takes the draw when both corners are sealed, however early', () => {
-    // Neither side has the other's predator type, and each sits on its corner:
-    // nobody can ever win by the corner.
-    const state = load('8R/9/9/9/9/9/9/9/r8 blue');
+  it('takes the draw when both corners are sealed and both seals will hold', () => {
+    // A Rock on each corner, and a spare Rock each to shuffle. Neither side has
+    // Paper, so all four are permanent and neither corner can be entered.
+    const state = load('8R/9/6R2/9/9/9/2r6/9/r8 blue');
     expect(isSealed(state, 'blue')).toBe(true);
     expect(isSealed(state, 'red')).toBe(true);
+    expect(canHoldSeal(state, 'blue')).toBe(true);
 
     const decision = shouldAcceptDraw(state, 'red', 'medium', 1);
     expect(decision.accept).toBe(true);
     expect(decision.reason).toMatch(/both corners are sealed/);
+  });
+
+  it('does not take it when a seal is about to be forced open', () => {
+    // Both corners look sealed, but each side's ONLY piece is the one holding
+    // the corner. There is no passing, so Blue has to step off a1 and the
+    // position is not the dead draw it appears to be.
+    const state = load('8R/9/9/9/9/9/9/9/r8 blue');
+    expect(isSealed(state, 'blue')).toBe(true);
+    expect(isSealed(state, 'red')).toBe(true);
+    expect(canHoldSeal(state, 'blue')).toBe(false);
+
+    const decision = shouldAcceptDraw(state, 'red', 'medium', 1);
+    expect(decision.reason).not.toMatch(/both corners are sealed/);
   });
 
   it('refuses while it is clearly winning', () => {

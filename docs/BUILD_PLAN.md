@@ -10,6 +10,7 @@ the previous milestone's "done when" holds.**
 | M2 | AI and the `tools/sim` harness | Balance runs land near §6 for all three variants | **built** |
 | M3 | Board UI and pass-and-play, Original only | Two people can finish a game on one phone | next |
 | C1 | Clocks, offers and time gifts (`docs/ADDENDUM-CLOCKS.md`) | Clock, offers and gift policy green; engine still timer-free | **done** |
+| C2 | Premove, abort, low-time warning, Zen | Logic green; rendering waits on M3 | **done** |
 | M4 | Play against the computer: worker, three levels, undo | Hard stays inside its time budget on a phone | |
 | M5 | 2×2 Corner and Neutrals, and the variant picker | All three variants playable both ways | |
 | M6 | Information aids (§10.5) | Each aid on and off, correct in the fixture positions | |

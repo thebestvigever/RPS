@@ -7,7 +7,7 @@
 // position like that is heading for a repetition or the 300-ply limit whatever
 // anyone does, so there is nothing to play on for.
 
-import { isSealed, other } from '@sps/engine';
+import { canHoldSeal, isSealed, other } from '@sps/engine';
 import type { GameState, Side } from '@sps/engine';
 import { LEVELS } from './levels.js';
 import type { Level } from './levels.js';
@@ -44,9 +44,20 @@ export function shouldAcceptDraw(
     return { accept: false, reason: 'the game is already over', score: 0 };
   }
 
-  // Both corners sealed: nobody can win by the corner, so there is nothing
-  // left to play for but the move limit.
-  if (isSealed(state, side) && isSealed(state, other(side))) {
+  // Both corners sealed AND both seals able to survive the next move: nobody
+  // can win by the corner, so there is nothing to play for but the move limit.
+  //
+  // The second half matters. There is no passing (2.4), so a Keep held by a
+  // side's only piece is forced open on their turn — a position that merely
+  // LOOKS sealed can be one move from losing. Accepting a draw there would be
+  // giving away a win.
+  const opponent = other(side);
+  if (
+    isSealed(state, side) &&
+    isSealed(state, opponent) &&
+    canHoldSeal(state, side) &&
+    canHoldSeal(state, opponent)
+  ) {
     return { accept: true, reason: 'both corners are sealed', score: 0 };
   }
 

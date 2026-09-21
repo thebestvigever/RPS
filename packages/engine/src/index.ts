@@ -79,6 +79,7 @@ export {
   toFen,
 } from './game.js';
 export {
+  canHoldSeal,
   distanceToGoal,
   isPermanent,
   isSealed,

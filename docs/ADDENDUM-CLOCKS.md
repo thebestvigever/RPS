@@ -143,21 +143,60 @@ enough for a new player to hold in their head.
 (under 60 points, where a piece is 100), and refuses in the first 24 plies,
 where an offer is a player trying their luck rather than a real proposal.
 
-It also accepts outright when **both corners are sealed**, whatever the
-evaluation. Neither side can then win by the corner (§2.10), and §6.3 found that
-is exactly where the Original's draws come from. There is nothing to play on
-for, and a computer that refused would just be running out the move limit.
+It also accepts outright when both corners are sealed **and both seals can
+survive their owner's next move**. See §8 for why the second half is not
+optional.
+
+## 8. A sealed corner is not a safe one
+
+There is no passing (§2.4). So if the side holding a Keep has **only** the piece
+standing on its corner, their turn forces them off it and the corner opens. A
+Keep can be broken by zugzwang, not merely abandoned.
+
+`isSealed` (§7.6) answers "is it sealed right now", which is all the spec ever
+claimed for it and all the interface needs for the lock icon. Anything reasoning
+about a *settled* game needs the stronger question, so the engine now also
+exposes:
+
+```ts
+canHoldSeal(state, side): boolean   // one ply: can side move and still be sealed?
+```
+
+This is why the flag rule below is the simple one, and why the computer's
+"both corners are sealed" shortcut checks both seals will hold. Without that
+check it would offer a draw in a position it was one move from winning.
+
+## 9. Premove, abort, low-time warning, Zen
+
+| Feature | Rule | Where |
+|---|---|---|
+| **Premove** | One queued at a time; a new one replaces it; an illegal one is dropped silently. Off in pass-and-play, where there is no waiting turn. | `premove.ts` |
+| **Abort** | Allowed in the first two plies, then "resign instead". Always allowed in pass-and-play. | `offers.ts` |
+| **Low-time warning** | Amber then red at the *smaller* of a fixed time and a share of the starting clock — a flat 30s threshold would be on from move one in a 1+0 game. | `clock.ts` |
+| **Zen** | Hides every aid, and **overrides rather than overwrites** them: switching it off restores the player's own choices, not the defaults. | `settings.ts` |
+
+Premoves are unusually simple in this game: every move is one king step, so a
+premove is either legal when the turn arrives or it is not. Nothing to
+disambiguate, nothing to promote.
 
 ---
 
+## Decided
+
+**A flag always loses.** Chess draws a timeout when the winner has insufficient
+mating material, and a sealed corner looked like the analogue — but it is not
+one. Vig's counter-example settles it: if the sealing side's only piece is the
+one on the corner, they are *forced* off it, and the opponent walks in. A seal
+can be broken, so "sealed" never means "the opponent cannot win", and there is
+nothing to base a draw on. The simple rule is also the correct one.
+
 ## Still open — for Vig
 
-1. **A flag against a player who could not have won.** Chess gives a draw if the
-   winner has insufficient mating material. The analogue here is real: if your
-   corner is sealed and your opponent flags, should you win on time, or is it a
-   draw? Current behaviour is the simple one — **the flag loses, always**.
-2. **A first-move time limit.** Lichess aborts a game if nobody moves in the
+1. **A first-move time limit.** Lichess aborts a game if nobody moves in the
    first 30 seconds. Worth having if online play arrives; pointless before.
-3. **Whether gifts belong in pass-and-play at all.** Both clocks are on one
+2. **Whether gifts belong in pass-and-play at all.** Both clocks are on one
    device, so giving your opponent time is a gesture between two people in a
    room. Kept because it costs nothing; drop it if it just clutters the bar.
+3. **Whether a premove should survive a dropped turn.** Right now a premove is
+   for exactly one turn. Lichess does the same; it is worth re-checking once
+   there is a board to feel it on.

@@ -3,6 +3,7 @@
 import { NEIGHBOURS, SQUARE_COUNT, distance } from './board.js';
 import { tallySides } from './fen.js';
 import { goalSquares, homeSquares } from './goals.js';
+import { legalMoves } from './moves.js';
 import { EMPTY, decodePiece, other, predatorOf } from './pieces.js';
 import type { GameState, Owner, PieceType, Side, Square } from './types.js';
 
@@ -142,6 +143,45 @@ export function isSealed(state: GameState, side: Side): boolean {
   }
 
   return true;
+}
+
+/**
+ * Can `side` still have a sealed corner once it has moved?
+ *
+ * `isSealed` is a snapshot, and there is no passing in this game (2.4). So a
+ * Keep held by a single piece standing on the corner is not safe at all: if it
+ * is that side's only piece, their turn forces them off it and the corner opens.
+ * A seal can be broken by zugzwang, not merely abandoned.
+ *
+ * That is why a sealed corner never means "the opponent cannot win", and why
+ * anything reasoning about a settled game — a draw offer, a result on time —
+ * has to ask this rather than `isSealed`.
+ *
+ * Looks one ply ahead, for the side to move. A side being squeezed out of a
+ * seal over several moves is a search question, not a static one.
+ */
+export function canHoldSeal(state: GameState, side: Side): boolean {
+  if (!isSealed(state, side)) return false;
+  // Not their turn: nothing is forcing them off it right now.
+  if (state.turn !== side) return true;
+
+  const moves = legalMoves(state);
+  if (moves.length === 0) return false;
+
+  const board = Int8Array.from(state.board);
+  const probe: GameState = { ...state, board };
+
+  for (const move of moves) {
+    const captured = board[move.to]!;
+    board[move.to] = board[move.from]!;
+    board[move.from] = EMPTY;
+    const held = isSealed(probe, side);
+    board[move.from] = board[move.to]!;
+    board[move.to] = captured;
+    if (held) return true;
+  }
+
+  return false;
 }
 
 /**
