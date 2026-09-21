@@ -1,0 +1,5 @@
+{
+  "//": "Packages are consumed as TypeScript source — each exports ./src/index.ts, and Vite and Vitest transform it. Nothing is built to dist, so there are no project references to keep in sync. Add a build step here only if something outside this repo ever needs to import the engine as JavaScript.",
+  "extends": "./tsconfig.base.json",
+  "files": []
+}

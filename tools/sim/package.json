@@ -1,0 +1,15 @@
+{
+  "name": "@sps/sim",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Node CLI for computer-vs-computer runs (spec 9.6).",
+  "scripts": {
+    "start": "node --experimental-strip-types src/index.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@sps/ai": "workspace:*",
+    "@sps/engine": "workspace:*"
+  }
+}

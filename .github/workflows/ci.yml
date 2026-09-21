@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+  # Spec 9.6: at Medium against Medium over 200 games per variant, the first
+  # player's share of decisive games stays between 40% and 60% and draws stay
+  # under 10%. Turn this on with M2 — it needs a working AI.
+  balance:
+    if: false
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        variant: [original, corner2x2, neutrals]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm sim --variant ${{ matrix.variant }} --blue medium --red medium --games 200 --seed 1

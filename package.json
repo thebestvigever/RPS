@@ -1,0 +1,30 @@
+{
+  "name": "stone-paper-scissors",
+  "private": true,
+  "version": "0.0.0",
+  "description": "A two-player abstract strategy game: rock-paper-scissors captures on a 9x9 board, king moves, race to the enemy corner.",
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm --filter @sps/web build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev": "pnpm --filter @sps/web dev",
+    "sim": "pnpm --filter @sps/sim start --"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "fast-check": "^3.23.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

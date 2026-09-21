@@ -1,0 +1,55 @@
+/* Starting colour tokens from spec 10.3 — adapt freely. Pieces must stay at 3:1
+   contrast or better against squares, and owner is never colour alone. */
+:root {
+  --blue: #3d6fd6;
+  --red: #d2493c;
+  --neutral: #7a7f87;
+  --square: #f4f3ef;
+  --square-alt: #e8e6df;
+  --grid: #2b2b2b;
+  --ink: #1b1b1b;
+  --paper: #ffffff;
+  --muted: #5d6068;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --blue: #7fa3ea;
+    --red: #e8776a;
+    --neutral: #9aa0a8;
+    --square: #2a2d33;
+    --square-alt: #23262b;
+    --grid: #cfd2d8;
+    --ink: #f2f2f0;
+    --paper: #16181c;
+    --muted: #a3a8b2;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 2rem 1rem;
+  background: var(--paper);
+  color: var(--ink);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+/* No horizontal scrolling at 360px (spec 10.11). */
+main { max-width: 42rem; margin: 0 auto; }
+
+h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
+
+.sub { color: var(--muted); margin: 0 0 2rem; }
+
+.variant { border: 1px solid var(--grid); border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem; }
+.variant h2 { font-size: 1rem; margin: 0 0 0.25rem; }
+.variant p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+
+.status { border-left: 3px solid var(--blue); padding-left: 1rem; margin-top: 2rem; }
+.status p { color: var(--muted); font-size: 0.9rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}

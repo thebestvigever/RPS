@@ -1,0 +1,7 @@
+{
+  "_source": "spec 11.3",
+  "_note": "Distinct move sequences of length n from the start position. A move that ends the game counts at its own depth and isn't expanded; repetition and the move limit are ignored. A mismatch almost always means a bug in move generation.",
+  "original":  { "1": 36, "2": 1293, "3": 52758, "4": 2146591 },
+  "corner2x2": { "1": 36, "2": 1293, "3": 52758, "4": 2146591 },
+  "neutrals":  { "1": 35, "2": 1225, "3": 48377, "4": 1908941 }
+}

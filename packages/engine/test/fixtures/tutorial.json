@@ -1,0 +1,29 @@
+{
+  "_source": "spec 10.9 — six puzzles, each to be verified against the engine",
+  "puzzles": [
+    { "n": 1, "teaches": "Move like a king", "variant": "original",
+      "fen": "R8/9/9/9/4p4/9/9/9/9 blue",
+      "solution": null, "legalCount": 8,
+      "note": "Any move of the Paper on e5 (8 legal)" },
+    { "n": 2, "teaches": "Take only what you beat", "variant": "original",
+      "fen": "9/9/9/3PRS3/4r4/9/9/9/9 blue",
+      "solution": "Re5xf6",
+      "note": "Paper on d6 beats Rock and Rock on e6 is the same type, so neither can be taken." },
+    { "n": 3, "teaches": "Reach the corner", "variant": "original",
+      "fen": "R8/7p1/9/9/9/9/9/9/9 blue",
+      "solution": "Ph8-i9#" },
+    { "n": 4, "teaches": "Defend your corner", "variant": "original",
+      "fen": "9/9/9/9/9/9/2r6/1S7/8P blue",
+      "solution": "Rc3xb2",
+      "note": "The only move that stops Red reaching a1 next turn." },
+    { "n": 5, "teaches": "Build the Keep", "variant": "original",
+      "fen": "9/9/9/4S4/9/9/9/1r7/9 blue",
+      "solution": "Rb2-a1",
+      "note": "Red has no Paper, so a Rock on your own corner can never be removed; show the lock icon." },
+    { "n": 6, "teaches": "Win the race", "variant": "original",
+      "fen": "9/9/6p2/9/9/9/2S6/9/9 blue",
+      "solution": "Pg7-h8",
+      "line": ["Pg7-h8", "Sc3-b2", "Ph8-i9#"],
+      "note": "You move first, so you arrive first; Pg7-h8 is the only move that keeps the lead." }
+  ]
+}

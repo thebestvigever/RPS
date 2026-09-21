@@ -1,0 +1,25 @@
+{
+  "name": "@sps/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The React app. Board is SVG; the computer player runs in a Web Worker.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit -p tsconfig.json && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@sps/ai": "workspace:*",
+    "@sps/engine": "workspace:*",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.17",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.0.5"
+  }
+}
