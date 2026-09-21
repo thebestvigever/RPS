@@ -120,6 +120,17 @@ difference.
 
 ## Starting M3
 
+**Read `docs/VISUAL_SYSTEM.md` first.** §10 of the spec left the look open; that
+file closes it, and is normative for what the interface renders. It slices M3
+into M3a (the board renders), M3b (it plays — this is the milestone gate) and
+M3c (the clock furniture C1 and C2 are waiting for), and it records four
+corrections to the design handoff that code in `packages/match` already
+contradicts. It also holds the three tests to write **before** the UI code:
+swatch contrast, greyscale at 24px, and dot alpha.
+
+M3 ships one theme, one family, one layout and Original only. The other themes,
+families and layouts are a data drop once M3 has been played and reviewed.
+
 The board is SVG, your own corner bottom-left, and the interface animates and
 announces from engine **events** rather than by diffing boards (§7.7). The
 engine already emits `move`, `capture`, `type-extinct`, `sealed` and
