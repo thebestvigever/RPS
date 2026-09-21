@@ -22,13 +22,13 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
-  # Spec 9.6: at Medium against Medium over 200 games per variant, the first
-  # player's share of decisive games stays between 40% and 60% and draws stay
-  # under 10%. Turn this on with M2 — it needs a working AI.
-  balance:
-    if: false
+  # A quick read on balance for every change. 40 games carries far too much
+  # noise to be a verdict, so it only fails on something badly broken; the real
+  # guard is the scheduled job in balance.yml.
+  balance-smoke:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         variant: [original, corner2x2, neutrals]
     steps:
@@ -41,4 +41,4 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm sim --variant ${{ matrix.variant }} --blue medium --red medium --games 200 --seed 1
+      - run: pnpm sim --variant ${{ matrix.variant }} --blue medium --red medium --games 40 --seed 1

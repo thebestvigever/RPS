@@ -1,0 +1,46 @@
+# The balance guard from spec 9.6: at Medium against Medium over 200 games per
+# variant, the first player's share of decisive games stays between 40% and 60%,
+# and draws stay under 10%. `pnpm sim` exits non-zero when it doesn't.
+#
+# This is minutes of CPU per variant, which is why it runs nightly rather than
+# on every push. Run it by hand before merging any rules change — spec 9.6 asks
+# for exactly that, and a large move away from the spec 6 numbers points to a
+# rules bug before it points to an AI difference.
+name: Balance
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      games:
+        description: Games per variant
+        default: '200'
+      seed:
+        description: Base seed
+        default: '1'
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [original, corner2x2, neutrals]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: >
+          pnpm sim
+          --variant ${{ matrix.variant }}
+          --blue medium --red medium
+          --games ${{ github.event.inputs.games || '200' }}
+          --seed ${{ github.event.inputs.seed || '1' }}

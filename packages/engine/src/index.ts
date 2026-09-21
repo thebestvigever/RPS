@@ -79,5 +79,6 @@ export {
   isPermanent,
   isSealed,
   nearestRunner,
+  permanentMask,
   typeCounts,
 } from './analysis.js';

@@ -7,18 +7,22 @@ player to reach the enemy's corner wins.
 Three variants ship in v1 — **Original**, **2×2 Corner** and **Neutrals** —
 playable against the computer or pass-and-play on one device.
 
-**Status: engine complete (M1).** The rules, both notations, events and the
-Keep are implemented and pass every fixture vector and perft number in the spec.
-The computer opponent is next. See `docs/BUILD_PLAN.md`.
+**Status: engine and computer opponent done (M1, M2).** The rules, both
+notations, events and the Keep pass every fixture vector and perft number in the
+spec. The AI plays all three variants at three levels, and the self-play harness
+runs. The board UI is next. See `docs/BUILD_PLAN.md`.
 
 ## Quick start
 
 ```sh
 pnpm install
-pnpm test        # 148 passing, 8 todo — the todos are the M2 checklist
+pnpm test        # 207 passing
 pnpm typecheck
 pnpm dev         # placeholder home screen
 pnpm build
+
+# Computer against computer, with the balance guard from the spec
+pnpm sim --variant original --blue medium --red medium --games 200 --seed 1
 ```
 
 Node 22+, pnpm 10+.

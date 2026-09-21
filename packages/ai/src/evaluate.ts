@@ -1,6 +1,6 @@
 // Evaluation — spec 9.2. These are the weights the reference AI used for every
-// result in spec 6, so changing one invalidates those baselines: re-run the
-// self-play harness (tools/sim) before and after.
+// result in spec 6, so changing one invalidates those baselines: run
+// `pnpm sim` before and after, and say what moved.
 //
 // score  = 100  * (my pieces - their pieces)
 //        +  70  * (my permanent pieces - their permanent pieces)
@@ -12,12 +12,13 @@
 //        +  6   * (8 - d) for each of my permanent pieces, d = distance to my own corner
 //        -  6   * (8 - d) for each of their permanent pieces
 //
-// Distance is king distance to the NEAREST square of the relevant goal or corner
-// (which is what makes the 2x2 Corner variant work). Neutral pieces are ignored;
-// the search sees their captures anyway.
+// Distance is king distance to the NEAREST square of the relevant goal or
+// corner, which is what makes the 2x2 Corner variant work. Neutral pieces are
+// ignored; the search sees their captures anyway.
 
-import { NotImplementedError } from '@sps/engine';
-import type { GameState } from '@sps/engine';
+import { EMPTY, SQUARE_COUNT, decodePiece, isSealed, other, permanentMask } from '@sps/engine';
+import type { GameState, Side } from '@sps/engine';
+import { distanceTables } from './tables.js';
 
 export const WEIGHTS = {
   material: 100,
@@ -37,7 +38,66 @@ export function terminalScore(kind: 'win' | 'loss' | 'draw', ply: number): numbe
   return kind === 'win' ? WIN_SCORE - ply : -WIN_SCORE + ply;
 }
 
+/** No piece of a side left: 9 is one past the longest real king distance, 8. */
+const NO_RUNNER = 9;
+
+interface SideTerms {
+  pieces: number;
+  permanent: number;
+  nearest: number;
+  advancement: number;
+  permanentHome: number;
+}
+
 /** From the point of view of the side to move. */
-export function evaluate(_state: GameState, _keepTerms: boolean): number {
-  throw new NotImplementedError('evaluate', '9.2');
+export function evaluate(state: GameState, keepTerms: boolean): number {
+  const me = state.turn;
+  const them = other(me);
+  const { board, variant } = state;
+  const tables = distanceTables(variant);
+  const permanent = permanentMask(state);
+
+  const terms: Record<Side, SideTerms> = {
+    blue: { pieces: 0, permanent: 0, nearest: NO_RUNNER, advancement: 0, permanentHome: 0 },
+    red: { pieces: 0, permanent: 0, nearest: NO_RUNNER, advancement: 0, permanentHome: 0 },
+  };
+
+  for (let square = 0; square < SQUARE_COUNT; square++) {
+    const code = board[square]!;
+    if (code === EMPTY) continue;
+
+    const owner = decodePiece(code)!.owner;
+    if (owner === 'neutral') continue;
+
+    const side = terms[owner];
+    side.pieces++;
+
+    const toGoal = tables.toGoal[owner][square]!;
+    if (toGoal < side.nearest) side.nearest = toGoal;
+    side.advancement += (9 - toGoal) ** 2;
+
+    if (permanent[square]) {
+      side.permanent++;
+      side.permanentHome += 8 - tables.toHome[owner][square]!;
+    }
+  }
+
+  const mine = terms[me];
+  const theirs = terms[them];
+
+  let score =
+    WEIGHTS.material * (mine.pieces - theirs.pieces) +
+    WEIGHTS.permanent * (mine.permanent - theirs.permanent) +
+    WEIGHTS.nearestDistance * (theirs.nearest - mine.nearest) +
+    WEIGHTS.advancement * (mine.advancement - theirs.advancement);
+
+  if (keepTerms) {
+    // A corner can only be sealed by a permanent piece, and the counts above
+    // already say whether one exists — so most nodes skip the search entirely.
+    if (mine.permanent > 0 && isSealed(state, me)) score += WEIGHTS.sealed;
+    if (theirs.permanent > 0 && isSealed(state, them)) score -= WEIGHTS.sealed;
+    score += WEIGHTS.permanentHome * (mine.permanentHome - theirs.permanentHome);
+  }
+
+  return score;
 }

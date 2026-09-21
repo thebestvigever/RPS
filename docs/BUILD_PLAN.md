@@ -7,14 +7,83 @@ the previous milestone's "done when" holds.**
 |---|---|---|---|
 | M0 | Scaffold: workspace, packages, fixtures, test harness | `pnpm test`, `pnpm typecheck` and `pnpm build` all green | **done** |
 | M1 | Engine: rules, position notation, move notation, events, `isSealed` | §11.1–§11.4 green, perft matches | **done** |
-| M2 | AI and the `tools/sim` harness | Balance runs land near §6 for all three variants | next |
-| M3 | Board UI and pass-and-play, Original only | Two people can finish a game on one phone | |
+| M2 | AI and the `tools/sim` harness | Balance runs land near §6 for all three variants | **built** |
+| M3 | Board UI and pass-and-play, Original only | Two people can finish a game on one phone | next |
 | M4 | Play against the computer: worker, three levels, undo | Hard stays inside its time budget on a phone | |
 | M5 | 2×2 Corner and Neutrals, and the variant picker | All three variants playable both ways | |
 | M6 | Information aids (§10.5) | Each aid on and off, correct in the fixture positions | |
 | M7 | How to play and the tutorial | A new player finishes all six puzzles | |
 | M8 | Sound, animation, accessibility, persistence, review and share links | §11.6 passes | |
 | M9 | Release | §11.7 fully ticked; deployed | |
+
+## What M2 left behind
+
+The computer opponent plays all three variants at three levels, and the
+self-play harness runs. 207 tests pass, with no todos left anywhere in the repo.
+
+**Search** is negamax with alpha-beta and a captures-only quiescence, walking one
+mutable board with make/unmake. It never calls `applyMove` — see the M1 note
+below for why. Move generation and sealing still come from the engine, so there
+is exactly one implementation of the rules.
+
+From the opening position, on this machine:
+
+| Level | Depth | Nodes | Time | Budget (§9.3) |
+|---|---|---|---|---|
+| Easy | 1 | 72 | 4 ms | 150 ms |
+| Medium | 2 | 526 | 10 ms | 400 ms |
+| Hard | 4 | 134,000 | 1.2 s | 1.2 s |
+
+Hard reaches depth **4**, not the three the spec asks for, because iterative
+deepening spends the whole budget. On a slower device it completes depth 3 and
+abandons depth 4, so the ladder degrades rather than blowing the budget — the
+shallowest search always runs to completion, because the AI must return a move.
+The real check is a mid-range phone (§11.7), which is M4.
+
+Three decisions worth knowing about:
+
+* **The root prunes, but only where it cannot matter.** `jitter` picks among
+  moves within a few points of the best, so only those need exact scores. Each
+  root move is searched with alpha just below "best so far minus jitter";
+  anything that cannot become a candidate fails low and returns a bound. Scoring
+  every root move with a full window instead — the obvious way to keep scores
+  honest — turns alpha-beta off at the root and cost about twenty times the
+  nodes. `analyseRoot` is exported so the invariant is testable: pruned and
+  unpruned must choose the same move.
+* **Move ordering breaks ties with a hash, not the generator.** Drawing the
+  tiebreak from the seeded stream couples it to how much of the tree the search
+  visits, so any change to ordering or pruning reshuffles every self-play game
+  and a before/after comparison becomes meaningless. Hashing the move keeps the
+  generator for the root choice alone.
+* **`isSealed` short-circuits when no defender piece is permanent.** There is no
+  wall in that case, so the search would reach every square — and most positions
+  have no permanent piece at all. Without this the Keep terms dominated the
+  profile.
+
+### Running the balance guard
+
+```sh
+pnpm sim --variant original --blue medium --red medium --games 200 --seed 1
+```
+
+At Medium against Medium the run exits non-zero if the first player's share of
+decisive games falls outside 40–60% or draws reach 10% (§9.6). That is minutes
+of CPU per variant, so CI runs a 40-game smoke on every change and the full
+200-game guard nightly (`.github/workflows/balance.yml`), plus on demand.
+
+**Run it before and after any rules change and say what moved.** A large
+difference from the §6 numbers points to a rules bug before it points to an AI
+difference.
+
+## Starting M3
+
+The board is SVG, your own corner bottom-left, and the interface animates and
+announces from engine **events** rather than by diffing boards (§7.7). The
+engine already emits `move`, `capture`, `type-extinct`, `sealed` and
+`game-over`, which is exactly what §10.5's aids and §10.6's announcements need.
+
+`apps/web` is still a placeholder. It reads the variant list and opening moves
+from the engine, which proves the wiring; everything else is M3.
 
 ## What M1 left behind
 

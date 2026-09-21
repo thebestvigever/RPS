@@ -53,3 +53,15 @@ h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+.variant { cursor: pointer; }
+.variant:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.variant--on { border-color: var(--blue); border-width: 2px; }
+
+.moves {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  line-height: 1.8;
+  color: var(--ink);
+  word-spacing: 0.15em;
+}

@@ -39,6 +39,26 @@ function permanentGiven(presence: Presence, owner: Owner, type: PieceType): bool
   return !presence[other(owner)][predator] && !presence.neutral[predator];
 }
 
+/**
+ * Permanence for every square in one pass: 1 where a piece can no longer be
+ * captured, 0 elsewhere. The bulk form of `isPermanent`, for callers that need
+ * the whole board — the AI's evaluation asks on every node (9.2).
+ */
+export function permanentMask(state: GameState): Uint8Array {
+  const { board } = state;
+  const presence = presenceOf(board);
+  const mask = new Uint8Array(SQUARE_COUNT);
+
+  for (let square = 0; square < SQUARE_COUNT; square++) {
+    const code = board[square]!;
+    if (code === EMPTY) continue;
+    const piece = decodePiece(code)!;
+    if (permanentGiven(presence, piece.owner, piece.type)) mask[square] = 1;
+  }
+
+  return mask;
+}
+
 export function typeCounts(state: GameState): Record<Side, Record<PieceType, number>> {
   return tallySides(state.board);
 }
@@ -82,13 +102,17 @@ export function isSealed(state: GameState, side: Side): boolean {
   const wall = new Uint8Array(SQUARE_COUNT);
   const seen = new Uint8Array(SQUARE_COUNT);
   const queue: Square[] = [];
+  let wallSize = 0;
 
   for (let square = 0; square < SQUARE_COUNT; square++) {
     const code = board[square]!;
     if (code === EMPTY) continue;
     const piece = decodePiece(code)!;
     if (piece.owner === side) {
-      if (permanentGiven(presence, side, piece.type)) wall[square] = 1;
+      if (permanentGiven(presence, side, piece.type)) {
+        wall[square] = 1;
+        wallSize++;
+      }
     } else if (piece.owner === attacker) {
       seen[square] = 1;
       queue.push(square);
@@ -97,6 +121,12 @@ export function isSealed(state: GameState, side: Side): boolean {
 
   // Nothing to seal against.
   if (queue.length === 0) return false;
+
+  // With no permanent defender there is no wall, so the search would reach
+  // every square including the goal. Skipping the walk here is what keeps this
+  // cheap enough to call on every node of a search — most positions have no
+  // permanent piece at all.
+  if (wallSize === 0) return false;
 
   const goals = homeSquares(variant, side);
 

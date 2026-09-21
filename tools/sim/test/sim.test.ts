@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { VARIANT_IDS } from '@sps/engine';
 import { parseOptions, DEFAULTS } from '../src/options.js';
 import { checkBalanceGuard } from '../src/summary.js';
+import { runSimulation } from '../src/index.js';
 import type { SimSummary } from '../src/summary.js';
 
 function summary(over: Partial<SimSummary>): SimSummary {
@@ -84,7 +86,39 @@ describe('CI balance guard (spec 9.6)', () => {
 });
 
 describe('self-play runs', () => {
-  it.todo('1,000 random-vs-random games per variant all terminate (spec 11.5)');
-  it.todo('Medium vs Medium over 200 games lands near the spec 6.1 numbers');
-  it.todo('the guard runs in CI for all three variants');
+  // A real 200-game guard run takes minutes, so it lives in CI and in the
+  // pre-rules-change routine, not here. This only proves the harness reports
+  // coherent numbers.
+  it.each(VARIANT_IDS)('%s: a short run reports a coherent summary', (id) => {
+    const games = 4;
+    const result = runSimulation({ variant: id, blue: 'easy', red: 'easy', games, seed: 11 });
+
+    expect(result.variant).toBe(id);
+    expect(result.blue + result.red + result.draws).toBe(games);
+
+    const byReason = Object.values(result.reasons).reduce((sum, n) => sum + n, 0);
+    expect(byReason).toBe(games);
+
+    expect(result.avgPlies).toBeGreaterThan(0);
+    expect(result.avgPlies).toBeLessThanOrEqual(300);
+    expect(result.avgCaptures).toBeGreaterThanOrEqual(0);
+
+    for (const rate of [result.typeWipedOutRate, result.firstToWipeOutWins, result.sealedRate]) {
+      expect(rate).toBeGreaterThanOrEqual(0);
+      expect(rate).toBeLessThanOrEqual(1);
+    }
+  }, 120_000);
+
+  it('is reproducible from its seed', () => {
+    const options = { variant: 'original' as const, blue: 'easy' as const, red: 'easy' as const, games: 3, seed: 5 };
+    expect(runSimulation(options)).toEqual(runSimulation(options));
+  }, 120_000);
+
+  it('plays different games from different seeds', () => {
+    const base = { variant: 'original' as const, blue: 'easy' as const, red: 'easy' as const, games: 6 };
+    const a = runSimulation({ ...base, seed: 1 });
+    const b = runSimulation({ ...base, seed: 2 });
+    // Same length every time would mean the seed is not reaching the moves.
+    expect(a.avgPlies === b.avgPlies && a.avgCaptures === b.avgCaptures).toBe(false);
+  }, 120_000);
 });

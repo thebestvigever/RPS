@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Node CLI for computer-vs-computer runs (spec 9.6).",
   "scripts": {
-    "start": "node --experimental-strip-types src/index.ts",
+    "start": "vite-node src/cli.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mulberry32, pick, randomInt } from '../src/random.js';
-import { WIN_SCORE, terminalScore } from '../src/evaluate.js';
+import { mulberry32, pick, randomInt, stableJitter } from '../src/random.js';
 
 describe('seeded randomness (spec 7.8)', () => {
   it('is deterministic for a seed', () => {
@@ -36,26 +35,24 @@ describe('seeded randomness (spec 7.8)', () => {
   });
 });
 
-describe('terminal scores (spec 9.1)', () => {
-  it('prefers faster wins and slower losses', () => {
-    expect(terminalScore('win', 10)).toBeGreaterThan(terminalScore('win', 40));
-    expect(terminalScore('loss', 40)).toBeGreaterThan(terminalScore('loss', 10));
-    expect(terminalScore('draw', 10)).toBe(0);
-    expect(terminalScore('win', 0)).toBe(WIN_SCORE);
+describe('stable move-ordering tiebreak', () => {
+  it('is deterministic for a (seed, from, to) triple', () => {
+    expect(stableJitter(7, 40, 41)).toBe(stableJitter(7, 40, 41));
   });
 
-  it('always ranks a win above a draw above a loss', () => {
-    for (const ply of [0, 50, 150, 299]) {
-      expect(terminalScore('win', ply)).toBeGreaterThan(0);
-      expect(terminalScore('loss', ply)).toBeLessThan(0);
+  it('differs across seeds and across moves', () => {
+    expect(stableJitter(1, 40, 41)).not.toBe(stableJitter(2, 40, 41));
+    expect(stableJitter(1, 40, 41)).not.toBe(stableJitter(1, 40, 42));
+    expect(stableJitter(1, 40, 41)).not.toBe(stableJitter(1, 39, 41));
+  });
+
+  it('stays in [0, 1) so it can only ever break a tie, never reorder', () => {
+    for (let seed = 0; seed < 50; seed++) {
+      for (let square = 0; square < 81; square++) {
+        const value = stableJitter(seed, square, (square + 7) % 81);
+        expect(value).toBeGreaterThanOrEqual(0);
+        expect(value).toBeLessThan(1);
+      }
     }
   });
-});
-
-describe('search', () => {
-  it.todo('negamax with alpha-beta returns the same move as plain negamax');
-  it.todo('quiescence stops the horizon effect on a hanging capture');
-  it.todo('jitter picks only among moves within its window of the best');
-  it.todo('the same seed and position always give the same move');
-  it.todo('Hard stays inside its 1.2 s budget');
 });

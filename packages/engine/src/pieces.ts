@@ -43,12 +43,34 @@ export function encodePiece(piece: Piece): number {
   return OWNER_CODE[piece.owner] * 4 + TYPE_CODE[piece.type] + 1;
 }
 
+/**
+ * One frozen Piece per code, built once.
+ *
+ * There are only nine pieces in the game, and `decodePiece` is the hottest
+ * function in the engine — move generation calls it well over a hundred times
+ * per position. Allocating a fresh object each time dominated the search, so
+ * callers share these. They are frozen because they are shared: a Piece read
+ * out of the board is a description, never something to mutate.
+ */
+const PIECE_BY_CODE: ReadonlyArray<Piece | null> = (() => {
+  const table: Array<Piece | null> = [];
+  for (let code = 0; code <= 11; code++) {
+    if (code === EMPTY) {
+      table.push(null);
+      continue;
+    }
+    const zeroBased = code - 1;
+    const owner = OWNER_BY_CODE[Math.floor(zeroBased / 4)];
+    const type = TYPE_BY_CODE[zeroBased % 4];
+    table.push(owner && type ? Object.freeze({ owner, type }) : null);
+  }
+  return table;
+})();
+
 /** Returns null for an empty cell. Throws on a code no piece maps to. */
 export function decodePiece(code: number): Piece | null {
   if (code === EMPTY) return null;
-  const zeroBased = code - 1;
-  const owner = OWNER_BY_CODE[Math.floor(zeroBased / 4)];
-  const type = TYPE_BY_CODE[zeroBased % 4];
-  if (!owner || !type) throw new Error(`Not a piece code: ${code}`);
-  return { owner, type };
+  const piece = PIECE_BY_CODE[code];
+  if (piece === undefined || piece === null) throw new Error(`Not a piece code: ${code}`);
+  return piece;
 }
