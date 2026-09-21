@@ -41,7 +41,8 @@ tools/
 docs/
   spec.md              the build spec — normative, and the source of truth
   ADDENDUM-CLOCKS.md   clocks, offers and gifts; overrides spec.md where they differ
-  BUILD_PLAN.md        milestones, and what each one left behind
+  BUILD_PLAN.md        milestones to v1, and what each one left behind
+  ROADMAP.md           how to actually play it, and what online play would take
 ```
 
 Packages are consumed as TypeScript source. Nothing builds to `dist/` except the

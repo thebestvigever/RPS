@@ -1,5 +1,8 @@
 # Build plan
 
+Milestones to v1. For what comes *after* — running it, online play, a lobby, a
+stronger engine — see `ROADMAP.md`.
+
 From spec §12. **Each milestone ends in something that runs. Don't start one until
 the previous milestone's "done when" holds.**
 
