@@ -20,7 +20,12 @@ export type {
   VariantId,
 } from './types.js';
 
-export { FenError, IllegalMoveError, NotImplementedError } from './errors.js';
+export {
+  FenError,
+  IllegalMoveError,
+  NotImplementedError,
+  NotationError,
+} from './errors.js';
 
 export {
   FILE_LETTERS,
@@ -55,19 +60,24 @@ export {
   getVariant,
 } from './variants.js';
 
-export { fromFen, toFen } from './fen.js';
+export { goalSquares, homeSquares, isGoalSquare } from './goals.js';
+
 export { moveToText, parseMove } from './notation.js';
-export { isLegal, legalMoves } from './moves.js';
+export { findLegalMove, isLegal, legalMoves } from './moves.js';
 export {
   applyMove,
   createGame,
+  fromFen,
   getResult,
   positionKey,
   replay,
+  resign,
+  toFen,
 } from './game.js';
 export {
   distanceToGoal,
   isPermanent,
   isSealed,
+  nearestRunner,
   typeCounts,
 } from './analysis.js';

@@ -7,13 +7,15 @@ player to reach the enemy's corner wins.
 Three variants ship in v1 — **Original**, **2×2 Corner** and **Neutrals** —
 playable against the computer or pass-and-play on one device.
 
-**Status: scaffold (M0).** The engine is next. See `docs/BUILD_PLAN.md`.
+**Status: engine complete (M1).** The rules, both notations, events and the
+Keep are implemented and pass every fixture vector and perft number in the spec.
+The computer opponent is next. See `docs/BUILD_PLAN.md`.
 
 ## Quick start
 
 ```sh
 pnpm install
-pnpm test        # 55 passing, 65 todo — the todos are the M1/M2 checklist
+pnpm test        # 148 passing, 8 todo — the todos are the M2 checklist
 pnpm typecheck
 pnpm dev         # placeholder home screen
 pnpm build

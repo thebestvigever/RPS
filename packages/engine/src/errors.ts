@@ -19,3 +19,10 @@ export class NotImplementedError extends Error {
     this.name = 'NotImplementedError';
   }
 }
+
+export class NotationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NotationError';
+  }
+}

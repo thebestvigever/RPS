@@ -1,62 +1,220 @@
 // Game lifecycle — spec 7.3 and 7.5.
 //
-// applyMove MUST do these steps in this order:
-//   1. If the game is over or the move is not in legalMoves, throw IllegalMoveError.
-//   2. Remove any captured piece from `to`; move the piece from `from` to `to`.
-//   3. ply += 1
-//   4. Emit events: `move`, then `capture`, then `type-extinct` for each type whose
-//      count just reached zero, then `sealed` for each side just sealed.
-//   5. Corner check. Mover has a piece on any of its goal squares -> winner: mover,
-//      reason 'corner'. Stop. (A neutral move can never trigger this.)
-//   6. Switch turn.
-//   7. No-moves check. New side to move has no legal moves -> winner: previous mover,
-//      reason 'no-moves'. Stop.
-//   8. Repetition. Increment positionKey count; at 3 -> draw, reason 'repetition'. Stop.
-//   9. Move limit. ply >= variant.draw.maxPlies -> draw, reason 'move-limit'.
-//  10. If a result was set, emit 'game-over'.
-//
-// The corner check comes first: a move that reaches the goal wins even if it also
-// leaves the opponent with no moves.
-//
-// createGame and fromFen MUST record the initial position with count 1, and MUST
-// detect an already-finished position.
-//
-// The engine is pure: same state plus same move always gives the same result, state
-// is plain serialisable data, and nothing here knows about screens, clocks or networks.
+// The engine is pure: same state plus same move always gives the same result,
+// state is plain serialisable data, and nothing here knows about screens, clocks
+// or networks. `applyMove` returns a new state; it never mutates its input.
 
-import { NotImplementedError } from './errors.js';
+import { IllegalMoveError } from './errors.js';
+import { boardToFen, parsePosition, tallySides, validateAgainstVariant } from './fen.js';
+import { goalSquares } from './goals.js';
+import { findLegalMove, legalMoves } from './moves.js';
+import { parseMove } from './notation.js';
+import { EMPTY, decodePiece, other } from './pieces.js';
+import { isSealed } from './analysis.js';
 import type {
   GameEvent,
   GameResult,
   GameState,
   MoveInput,
+  Side,
   VariantConfig,
 } from './types.js';
 
-export function createGame(_variant: VariantConfig): GameState {
-  throw new NotImplementedError('createGame', '7.3');
+/** board + side to move (2.9). */
+export function positionKey(state: GameState): string {
+  return keyOf(state.board, state.turn);
+}
+
+function keyOf(board: Int8Array, turn: Side): string {
+  return (turn === 'blue' ? 'b' : 'r') + String.fromCharCode(...board);
+}
+
+function sideOnGoal(state: GameState, side: Side): boolean {
+  for (const square of goalSquares(state.variant, side)) {
+    const code = state.board[square]!;
+    if (code === EMPTY) continue;
+    if (decodePiece(code)!.owner === side) return true;
+  }
+  return false;
+}
+
+/**
+ * Seeds the repetition count and settles whether the position is already over.
+ * Both loaders go through here, so they can't disagree (7.5).
+ */
+function settleLoadedPosition(state: GameState): GameState {
+  state.positionCounts.set(positionKey(state), 1);
+
+  // A side already standing on its goal has won: mark the position over rather
+  // than letting play continue (2.7). If somehow both are, the side that is not
+  // to move is the one who just played.
+  const onGoal = (['blue', 'red'] as const).filter((side) => sideOnGoal(state, side));
+  if (onGoal.length > 0) {
+    const winner = onGoal.find((side) => side !== state.turn) ?? onGoal[0]!;
+    state.result = { winner, reason: 'corner' };
+    return state;
+  }
+
+  if (legalMoves(state).length === 0) {
+    state.result = { winner: other(state.turn), reason: 'no-moves' };
+  }
+
+  return state;
+}
+
+export function fromFen(fen: string, variant: VariantConfig): GameState {
+  const { board, turn } = parsePosition(fen);
+  validateAgainstVariant(board, variant);
+
+  return settleLoadedPosition({
+    variant,
+    board,
+    turn,
+    ply: 0,
+    positionCounts: new Map(),
+    result: null,
+  });
+}
+
+export function toFen(state: GameState): string {
+  return boardToFen(state.board, state.turn);
+}
+
+export function createGame(variant: VariantConfig): GameState {
+  return fromFen(variant.start, variant);
+}
+
+export function getResult(state: GameState): GameResult | null {
+  return state.result;
 }
 
 export function applyMove(
-  _state: GameState,
-  _move: MoveInput,
+  state: GameState,
+  move: MoveInput,
 ): { state: GameState; events: GameEvent[] } {
-  throw new NotImplementedError('applyMove', '7.5');
+  // 1. Reject anything that isn't legal right now.
+  if (state.result) {
+    throw new IllegalMoveError('the game is over');
+  }
+  const legal = findLegalMove(state, move);
+  if (!legal) {
+    throw new IllegalMoveError(
+      `illegal move ${move.from}->${move.to} for ${state.turn} in this position`,
+    );
+  }
+
+  const mover = state.turn;
+  const sealedBefore = {
+    blue: isSealed(state, 'blue'),
+    red: isSealed(state, 'red'),
+  };
+  const countsBefore = tallySides(state.board);
+
+  // 2. Remove any captured piece; move the piece from `from` to `to`.
+  const board = Int8Array.from(state.board);
+  board[legal.to] = board[legal.from]!;
+  board[legal.from] = EMPTY;
+
+  const next: GameState = {
+    variant: state.variant,
+    board,
+    turn: mover,
+    // 3. ply += 1
+    ply: state.ply + 1,
+    positionCounts: new Map(state.positionCounts),
+    result: null,
+  };
+
+  // 4. Events, in order: move, capture, type-extinct, sealed.
+  const events: GameEvent[] = [
+    { type: 'move', from: legal.from, to: legal.to, piece: legal.piece },
+  ];
+
+  if (legal.captured) {
+    events.push({
+      type: 'capture',
+      at: legal.to,
+      captured: legal.captured,
+      by: legal.piece,
+    });
+
+    const victim = legal.captured;
+    if (victim.owner !== 'neutral') {
+      const countsAfter = tallySides(board);
+      if (countsBefore[victim.owner][victim.type] > 0 && countsAfter[victim.owner][victim.type] === 0) {
+        events.push({ type: 'type-extinct', side: victim.owner, pieceType: victim.type });
+      }
+    }
+  }
+
+  for (const side of ['blue', 'red'] as const) {
+    if (!sealedBefore[side] && isSealed(next, side)) {
+      events.push({ type: 'sealed', side });
+    }
+  }
+
+  // 5. Corner check, before anything else: a move that reaches the goal wins
+  //    even if it also leaves the opponent with no moves. A neutral move can
+  //    never trigger this, because a neutral is nobody's piece.
+  if (sideOnGoal(next, mover)) {
+    next.result = { winner: mover, reason: 'corner' };
+    events.push({ type: 'game-over', result: next.result });
+    return { state: next, events };
+  }
+
+  // 6. Switch turn.
+  next.turn = other(mover);
+
+  // 7. No legal moves for the new side to move: they lose (2.8).
+  if (legalMoves(next).length === 0) {
+    next.result = { winner: mover, reason: 'no-moves' };
+    events.push({ type: 'game-over', result: next.result });
+    return { state: next, events };
+  }
+
+  // 8. Threefold repetition (2.9).
+  const key = positionKey(next);
+  const seen = (next.positionCounts.get(key) ?? 0) + 1;
+  next.positionCounts.set(key, seen);
+  if (seen >= next.variant.draw.repetitions) {
+    next.result = { winner: null, reason: 'repetition' };
+    events.push({ type: 'game-over', result: next.result });
+    return { state: next, events };
+  }
+
+  // 9. Move limit (2.9).
+  if (next.ply >= next.variant.draw.maxPlies) {
+    next.result = { winner: null, reason: 'move-limit' };
+    events.push({ type: 'game-over', result: next.result });
+  }
+
+  return { state: next, events };
 }
 
-export function getResult(_state: GameState): GameResult | null {
-  throw new NotImplementedError('getResult', '7.3');
+/** Ends the game for the resigning side. Always allowed (2.9). */
+export function resign(state: GameState, side: Side): GameState {
+  if (state.result) throw new IllegalMoveError('the game is over');
+  return { ...state, result: { winner: other(side), reason: 'resign' } };
 }
 
-/** board + side to move. Backs threefold repetition (spec 2.9). */
-export function positionKey(_state: GameState): string {
-  throw new NotImplementedError('positionKey', '7.3');
-}
-
-/** The move list is the source of truth: state is always replay(variant, moves). */
+/**
+ * The move list is the source of truth: full state is always replay(variant,
+ * moves). Saved games, undo, shareable links and any future server log all use
+ * this (8.3).
+ */
 export function replay(
-  _variant: VariantConfig,
-  _moves: string[],
+  variant: VariantConfig,
+  moves: string[],
 ): { state: GameState; events: GameEvent[][] } {
-  throw new NotImplementedError('replay', '8.3');
+  let state = createGame(variant);
+  const events: GameEvent[][] = [];
+
+  for (const text of moves) {
+    const move = parseMove(state, text);
+    const applied = applyMove(state, move);
+    state = applied.state;
+    events.push(applied.events);
+  }
+
+  return { state, events };
 }

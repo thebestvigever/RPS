@@ -6,8 +6,8 @@ the previous milestone's "done when" holds.**
 | # | Build | Done when | State |
 |---|---|---|---|
 | M0 | Scaffold: workspace, packages, fixtures, test harness | `pnpm test`, `pnpm typecheck` and `pnpm build` all green | **done** |
-| M1 | Engine: rules, position notation, move notation, events, `isSealed` | §11.1–§11.4 green, perft matches | next |
-| M2 | AI and the `tools/sim` harness | Balance runs land near §6 for all three variants | |
+| M1 | Engine: rules, position notation, move notation, events, `isSealed` | §11.1–§11.4 green, perft matches | **done** |
+| M2 | AI and the `tools/sim` harness | Balance runs land near §6 for all three variants | next |
 | M3 | Board UI and pass-and-play, Original only | Two people can finish a game on one phone | |
 | M4 | Play against the computer: worker, three levels, undo | Hard stays inside its time budget on a phone | |
 | M5 | 2×2 Corner and Neutrals, and the variant picker | All three variants playable both ways | |
@@ -15,6 +15,53 @@ the previous milestone's "done when" holds.**
 | M7 | How to play and the tutorial | A new player finishes all six puzzles | |
 | M8 | Sound, animation, accessibility, persistence, review and share links | §11.6 passes | |
 | M9 | Release | §11.7 fully ticked; deployed | |
+
+## What M1 left behind
+
+The engine is complete and under test. 148 tests pass; the 8 remaining todos are
+all M2 (search behaviour and the self-play runs).
+
+**The numbers that matter.** Perft matches the spec exactly at every depth, on
+the first run, for all three variants:
+
+| Variant | 1 ply | 2 plies | 3 plies | 4 plies |
+|---|---|---|---|---|
+| Original | 36 | 1,293 | 52,758 | 2,146,591 |
+| 2×2 Corner | 36 | 1,293 | 52,758 | 2,146,591 |
+| Neutrals | 35 | 1,225 | 48,377 | 1,908,941 |
+
+All eleven fixture vectors from §11.2 pass, as do all six tutorial puzzles and
+1,200 random games (400 per variant) with no invariant broken.
+
+**Modules.** `board.ts` geometry · `pieces.ts` the cycle and encoding ·
+`goals.ts` goal and home squares · `fen.ts` position notation ·
+`notation.ts` move notation · `moves.ts` generation · `game.ts` lifecycle ·
+`analysis.ts` permanence, sealing and distance.
+
+Two things worth knowing before touching the engine:
+
+* **`applyMove` calls `isSealed` four times** — twice before, twice after — so it
+  can emit the `sealed` event without the interface diffing boards. That is
+  ~2,600 operations a move, invisible in play but real in a search. `perft` in
+  the tests shows the pattern to use instead: `legalMoves` plus make/unmake on a
+  mutable board, which the spec sanctions for search (§7.2). **M2's search must
+  not go through `applyMove`.**
+* **`parseMove` is strict about everything derived** — the type letter, the `n`
+  prefix, `x` versus `-`, and the `#`. Writing `Sh8-i9` for a winning move is a
+  `NotationError`, not a silently accepted move. This is what makes a saved game
+  self-checking.
+
+## Starting M2
+
+The AI package already has the weights (§9.2), the difficulty ladder (§9.3),
+`mulberry32` (§7.8) and the worker protocol (§9.4) as data and types. What is
+missing is `evaluate`, `chooseMove` and `runSimulation`.
+
+Get `tools/sim` running first, then tune. The check that matters: Medium against
+Medium over 200 games per variant should land near §6.1 — a first-player share
+of decisive games between 40% and 60%, draws under 10%. `checkBalanceGuard`
+already encodes that and is tested. Large differences from §6 point to a rules
+bug before they point to an AI difference.
 
 ## What M0 left behind
 
@@ -34,11 +81,9 @@ throws `NotImplementedError` with its spec section.
   constants (§9.1, §9.2). The function itself is a stub.
 * `sim/options.ts`, `sim/summary.ts` — CLI parsing and the CI balance guard (§9.6).
 
-**Stubbed, with the spec algorithm in a comment above each:**
-`fromFen`, `toFen`, `moveToText`, `parseMove`, `legalMoves`, `isLegal`,
-`createGame`, `applyMove`, `getResult`, `positionKey`, `replay`, `typeCounts`,
-`isPermanent`, `isSealed`, `distanceToGoal`, `evaluate`, `chooseMove`,
-`runSimulation`.
+**Stubbed at the time, with the spec algorithm in a comment above each:**
+everything in the engine (all delivered by M1), plus `evaluate`, `chooseMove`
+and `runSimulation`, which remain for M2.
 
 **Fixtures, ready to run against the engine** — all eleven vectors from §11.2,
 the 36 opening moves and the perft numbers from §11.3, and the six tutorial
@@ -49,20 +94,15 @@ so a transcription typo surfaces now rather than as a mysterious engine failure.
 The 65 `todo` entries in the test report are the M1–M2 checklist, taken from
 §11.1, §11.4 and §11.5.
 
-## Starting M1
+## Running the suite
 
 ```sh
 pnpm install
-pnpm test --watch
+pnpm test
 ```
 
-Work through `packages/engine/test/rules.todo.test.ts` top to bottom, turning
-each `it.todo` into a real test. The order that works: `fen.ts` first (nothing
-can be tested without loading a position), then `moves.ts`, then `game.ts`, then
-`analysis.ts`. Perft is the backstop — if the numbers in `perft.json` don't
-match, the bug is in move generation, and comparing move lists position by
-position is how you find it.
+The suite runs 400 random games per variant. For the full §11.5 number:
 
-**Do not start M3 until §11.1–§11.4 are green and perft matches.** That
-sequencing is the spec's, and it is the reason the reference simulations in §6
-are trustworthy.
+```sh
+SPS_RANDOM_GAMES=1000 pnpm test
+```
