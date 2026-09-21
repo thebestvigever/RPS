@@ -9,12 +9,54 @@ the previous milestone's "done when" holds.**
 | M1 | Engine: rules, position notation, move notation, events, `isSealed` | §11.1–§11.4 green, perft matches | **done** |
 | M2 | AI and the `tools/sim` harness | Balance runs land near §6 for all three variants | **built** |
 | M3 | Board UI and pass-and-play, Original only | Two people can finish a game on one phone | next |
+| C1 | Clocks, offers and time gifts (`docs/ADDENDUM-CLOCKS.md`) | Clock, offers and gift policy green; engine still timer-free | **done** |
 | M4 | Play against the computer: worker, three levels, undo | Hard stays inside its time budget on a phone | |
 | M5 | 2×2 Corner and Neutrals, and the variant picker | All three variants playable both ways | |
 | M6 | Information aids (§10.5) | Each aid on and off, correct in the fixture positions | |
 | M7 | How to play and the tutorial | A new player finishes all six puzzles | |
 | M8 | Sound, animation, accessibility, persistence, review and share links | §11.6 passes | |
 | M9 | Release | §11.7 fully ticked; deployed | |
+
+## What C1 left behind
+
+Vig asked for clocks, draw offers and two ways of handing time around — which
+the base spec had put in the future (§13.2) or restricted to pass-and-play
+(§2.9). `docs/ADDENDUM-CLOCKS.md` records the change and is normative where it
+disagrees with `spec.md`.
+
+**`packages/match` is the new home**, and it is pure in the same sense the
+engine is: it holds no timer and never reads the time itself — every operation
+is handed `now`. That is what lets a clock be tested to the millisecond,
+replayed from a record, and later run on the server unchanged. §7.1's rule that
+the engine knows nothing of clocks is untouched.
+
+* `time-control.ts` — stages, so tournament controls are expressible rather than
+  special-cased; four bonus kinds; presets sized for **this** game's length.
+* `clock.ts` — the clock itself, plus pause, gifts and flagging.
+* `offers.ts` — draw, takeback and rematch, on lichess's rules.
+* `gifts.ts` — who may give time to whom, per mode.
+
+Three things worth knowing:
+
+* **Presets assume 67 moves a side, not chess's 40.** §6.1 measured 129–138
+  plies. At 67 moves a 2-second increment is worth over two minutes, so a "3+2"
+  here is a much longer game than a chess 3+2, and the categories are derived
+  from that rather than copied.
+* **Bronstein and simple delay are one code path.** They are the same
+  arithmetic and differ only in display. Two `kind`s so the interface can tell
+  them apart; one computation so they can never disagree about the time.
+* **A pause cannot rewind a delay.** The clock banks `elapsedThisTurnMs` across
+  pauses, so opening the menu inside a simple delay does not hand out free time.
+  A test covers it, because the naive version is wrong in a way nobody would
+  notice until someone exploited it.
+
+The computer answers draw offers in `packages/ai/src/draw.ts`: it accepts when
+it is not meaningfully ahead, refuses in the opening, and accepts outright when
+both corners are sealed — §6.3 found that is where the Original's draws come
+from, so there is genuinely nothing to play on for.
+
+**Not built:** the clock UI, the time-control picker, and wiring the record's
+`clock` section on save. Those are M3/M8, and they wait on visual direction.
 
 ## What M2 left behind
 

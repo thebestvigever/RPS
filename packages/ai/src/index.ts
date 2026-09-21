@@ -9,3 +9,5 @@ export { analyseRoot, chooseMove, NoMovesError } from './search.js';
 export type { RootMoveScore, SearchResult, SearchStats } from './search.js';
 export type { FromWorker, ToWorker } from './worker-protocol.js';
 export { think } from './think.js';
+export { DRAW_ACCEPT_THRESHOLD, DRAW_MIN_PLY, shouldAcceptDraw } from './draw.js';
+export type { DrawDecision } from './draw.js';

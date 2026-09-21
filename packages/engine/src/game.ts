@@ -198,6 +198,30 @@ export function resign(state: GameState, side: Side): GameState {
 }
 
 /**
+ * `side` ran out of time, so the opponent wins.
+ *
+ * The engine has no timers and never decides this for itself — the caller owns
+ * the clock and says when it has fallen. This exists so that a flagged game
+ * carries a result like any other.
+ */
+export function flag(state: GameState, side: Side): GameState {
+  if (state.result) throw new IllegalMoveError('the game is over');
+  return { ...state, result: { winner: other(side), reason: 'flag' } };
+}
+
+/** Both players agreed a draw (2.9). */
+export function agreeDraw(state: GameState): GameState {
+  if (state.result) throw new IllegalMoveError('the game is over');
+  return { ...state, result: { winner: null, reason: 'agreed' } };
+}
+
+/** Abandoned before it became a game. Counts for nothing. */
+export function abortGame(state: GameState): GameState {
+  if (state.result) throw new IllegalMoveError('the game is over');
+  return { ...state, result: { winner: null, reason: 'aborted' } };
+}
+
+/**
  * The move list is the source of truth: full state is always replay(variant,
  * moves). Saved games, undo, shareable links and any future server log all use
  * this (8.3).

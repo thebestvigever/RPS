@@ -16,7 +16,7 @@ runs. The board UI is next. See `docs/BUILD_PLAN.md`.
 
 ```sh
 pnpm install
-pnpm test        # 207 passing
+pnpm test        # 263 passing
 pnpm typecheck
 pnpm dev         # placeholder home screen
 pnpm build
@@ -33,13 +33,15 @@ Node 22+, pnpm 10+.
 packages/
   engine/    rules only: no DOM, no timers, no Math.random, no dependencies
   ai/        search and evaluation; depends on engine; runs in a Worker and in Node
+  match/     clocks, offers and time gifts; pure — it is handed `now`, never reads it
 apps/
   web/       the React app
 tools/
   sim/       Node CLI for computer-vs-computer runs (spec §9.6)
 docs/
-  spec.md          the build spec — normative, and the source of truth
-  BUILD_PLAN.md    milestones, and exactly what the scaffold left behind
+  spec.md              the build spec — normative, and the source of truth
+  ADDENDUM-CLOCKS.md   clocks, offers and gifts; overrides spec.md where they differ
+  BUILD_PLAN.md        milestones, and what each one left behind
 ```
 
 Packages are consumed as TypeScript source. Nothing builds to `dist/` except the

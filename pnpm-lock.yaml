@@ -60,6 +60,12 @@ importers:
 
   packages/engine: {}
 
+  packages/match:
+    dependencies:
+      '@sps/engine':
+        specifier: workspace:*
+        version: link:../engine
+
   tools/sim:
     dependencies:
       '@sps/ai':
