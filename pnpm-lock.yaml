@@ -29,9 +29,15 @@ importers:
       '@sps/ai':
         specifier: workspace:*
         version: link:../../packages/ai
+      '@sps/board':
+        specifier: workspace:*
+        version: link:../../packages/board
       '@sps/engine':
         specifier: workspace:*
         version: link:../../packages/engine
+      '@sps/match':
+        specifier: workspace:*
+        version: link:../../packages/match
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -53,6 +59,12 @@ importers:
         version: 6.4.3(@types/node@22.20.4)
 
   packages/ai:
+    dependencies:
+      '@sps/engine':
+        specifier: workspace:*
+        version: link:../engine
+
+  packages/board:
     dependencies:
       '@sps/engine':
         specifier: workspace:*

@@ -47,6 +47,11 @@ h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
 .variant h2 { font-size: 1rem; margin: 0 0 0.25rem; }
 .variant p { margin: 0; color: var(--muted); font-size: 0.9rem; }
 
+/* docs/VISUAL_SYSTEM.md 4/8: the board's own tokens live in @sps/board's
+   themes.ts, not here — this just places the SVG it returns. */
+.board { margin: 1.5rem 0; max-width: 100%; }
+.board svg { display: block; width: 100%; height: auto; }
+
 .status { border-left: 3px solid var(--blue); padding-left: 1rem; margin-top: 2rem; }
 .status p { color: var(--muted); font-size: 0.9rem; }
 

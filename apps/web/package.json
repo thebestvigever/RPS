@@ -12,7 +12,9 @@
   },
   "dependencies": {
     "@sps/ai": "workspace:*",
+    "@sps/board": "workspace:*",
     "@sps/engine": "workspace:*",
+    "@sps/match": "workspace:*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
