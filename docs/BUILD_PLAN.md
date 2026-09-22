@@ -14,7 +14,7 @@ the previous milestone's "done when" holds.**
 | M3 | Board UI and pass-and-play, Original only | Two people can finish a game on one phone | **done** |
 | C1 | Clocks, offers and time gifts (`docs/ADDENDUM-CLOCKS.md`) | Clock, offers and gift policy green; engine still timer-free | **done, and rendered (M3c)** |
 | C2 | Premove, abort, low-time warning, Zen | Logic green; rendering waits on M3 | **done; abort and low-time rendered (M3c) — premove and Zen wait on M4/M6** |
-| M4 | Play against the computer: worker, three levels, undo | Hard stays inside its time budget on a phone | |
+| M4 | Play against the computer: worker, three levels, undo | Hard stays inside its time budget on a phone | **done** |
 | M5 | 2×2 Corner and Neutrals, and the variant picker | All three variants playable both ways | |
 | M6 | Information aids (§10.5) | Each aid on and off, correct in the fixture positions | |
 | M7 | How to play and the tutorial | A new player finishes all six puzzles | |
@@ -235,6 +235,47 @@ to draw, never of when). Everything about *when* — the gesture state machine,
 the two WAAPI animations, the victim overlay — has no DOM to live in inside
 `@sps/board`, so it's `apps/web`'s, same split M3a drew for motion's naming
 versus its timing.
+
+## What M4 left behind
+
+The computer plays. `apps/web/src/ai-worker.ts` spawns `packages/ai/src/worker.ts`
+straight from its real source path — Vite bundles it as its own chunk from a
+relative `new URL(...)` import, no package export needed for a browser-only
+entry point that `@sps/ai` (which also runs in Node, for `tools/sim`)
+shouldn't carry. Every move the computer makes goes through the exact same
+`doMove` a tap does: the worker's reply is text, `parseMove` turns it into a
+`Move`, and from there it's indistinguishable from a human's — the slide, the
+capture motion, the clock press, all of it, for free.
+
+Verified against the real search, not a stub: a full exchange played through
+actual clicks, the worker's reply landing as a real legal move ("Red Paper h5
+to i5") with zero console errors, and a draw offer answered by the real
+`shouldAcceptDraw` ("Computer declines — it is too early to tell" — the exact
+sentence `packages/ai/src/draw.ts` produces for a position under `DRAW_MIN_PLY`).
+
+**One thing is a documented scope decision, not a gap: the human only ever
+plays Blue.** Spec 10.2 rotates the board 180 degrees for a human playing
+Red, and no `@sps/board` release does board orientation yet — that was M3b's
+own documented cut, for the same reason. Letting Home offer "play Red" before
+orientation exists would show a Red-playing human their own pieces starting
+in the far corner, which is worse than not offering the choice at all. Home's
+side picker (Blue / Red / Random, spec 10.1) and Rematch's "sides swapped"
+button both wait on it — one milestone's cut turning out to gate two features
+later is worth knowing, not just noting once.
+
+**`shouldAcceptDraw` runs on the main thread, not the worker.** It can search
+as deep as `chooseMove` does, so this is the one place M4 doesn't fully honour
+"search never blocks the board" (spec 9.1) — a draw offer is rare and not
+time-critical the way every move is, which is why it was a reasonable place
+to cut, but it is a cut: the worker protocol would need a second message type
+to close it, and that's a small, well-scoped follow-up rather than something
+folded in here.
+
+**Undo against the computer takes back two plies (spec 10.8)**, landing back
+on the human's own turn — verified by playing one exchange and undoing it
+back to the empty history. It doesn't refund clock time any more than M3b's
+pass-and-play undo does, for the same reason (a real replay needs the
+record's per-move `remainingMs`, spec 8.3 — M8).
 
 ## What M3c left behind
 
