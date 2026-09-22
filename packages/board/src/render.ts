@@ -48,6 +48,13 @@ import {
 } from './sizing.js';
 import { el, group, round, text } from './svg.js';
 
+/**
+ * The inner, animatable group inside every piece (see `piecesLayer`). Exported
+ * because apps/web animates it and its stylesheet shakes it — three places
+ * that must name the same node, and a typo in any of them is a silent no-op.
+ */
+export const PIECE_MOTION_CLASS = 'piece-motion';
+
 export interface Appearance {
   /**
    * Which literal colour paints Blue and Red pieces. "My colour" and "the
@@ -415,9 +422,25 @@ function coordinatesLayer(
   return group('g', {}, labels.join(''));
 }
 
-/** Each piece's group carries `data-square` — a stable hook for M3b's click
- * and drag targets, and for `test/render.test.ts` to count pieces without
- * depending on the mark's own internal markup. */
+/**
+ * Each piece's group carries `data-square` — a stable hook for click and drag
+ * targets, and for `test/render.test.ts` to count pieces without depending on
+ * the mark's own internal markup.
+ *
+ * Inside it sits a second, untransformed group, and that nesting is load-
+ * bearing rather than tidy markup. A CSS `transform` **property** replaces an
+ * SVG `transform` **attribute** outright — it does not compose with it — so
+ * animating the outer group (which carries the piece's `translate` to its
+ * square) threw the piece to the SVG origin for the length of the animation.
+ * Every move flashed its piece through the top-left square and snapped back,
+ * and `scale()` on a capture pivoted about the board's corner instead of the
+ * piece. Animating the inner group instead composes correctly, because its
+ * own transform is identity and there is nothing to clobber.
+ *
+ * `transform-box: fill-box` puts the pivot on the mark's own bounding box, so
+ * a capture's scale and rotate turn about the piece rather than about the
+ * top-left of its square.
+ */
 function piecesLayer(
   board: Int8Array,
   family: Family,
@@ -449,7 +472,11 @@ function piecesLayer(
             squarePx,
           );
     pieces.push(
-      group('g', { transform: `translate(${round(x)},${round(y)})`, 'data-square': square }, markup),
+      group(
+        'g',
+        { transform: `translate(${round(x)},${round(y)})`, 'data-square': square },
+        group('g', { class: PIECE_MOTION_CLASS, style: 'transform-box: fill-box; transform-origin: center' }, markup),
+      ),
     );
   }
   return group('g', {}, pieces.join(''));

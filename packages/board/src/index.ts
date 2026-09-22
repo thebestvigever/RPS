@@ -43,7 +43,7 @@ export {
 } from './sizing.js';
 
 export type { Appearance, RenderOptions, PieceSampleOptions, Selection, SelectionDestination } from './render.js';
-export { renderBoard, renderPieceSample } from './render.js';
+export { PIECE_MOTION_CLASS, renderBoard, renderPieceSample } from './render.js';
 
 export type { MotionKind } from './motion.js';
 export { captureMotion, MOTION_MS } from './motion.js';

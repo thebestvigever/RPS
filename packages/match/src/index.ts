@@ -57,6 +57,8 @@ export {
   withdraw,
 } from './offers.js';
 
+export { controlsSide } from './control.js';
+
 export type { GiftPolicy } from './gifts.js';
 export { GIFT_POLICIES, canGive } from './gifts.js';
 
