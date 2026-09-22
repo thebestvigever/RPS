@@ -1,0 +1,21 @@
+{
+  "name": "@sps/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The referee's shell: a Cloudflare Worker that routes, and one Durable Object per match that holds the room. All the rules live in @sps/referee \u2014 this is sockets, storage and alarms.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@sps/engine": "workspace:*",
+    "@sps/match": "workspace:*",
+    "@sps/referee": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260921.1",
+    "wrangler": "^4.0.0"
+  }
+}

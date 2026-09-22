@@ -91,13 +91,14 @@ Two decisions taken early pay off here:
 
 ### What needs building
 
-| Piece | Why |
-|---|---|
-| A room per game | Somewhere both players connect to, holding the one true game |
-| A live connection | A line that stays open, rather than each browser repeatedly asking "anything new?" |
-| Referee logic | Checking moves, running the clocks, declaring results |
-| Invite links | Create a game, send a link, whoever opens it takes the other side |
-| Dropout handling | Wifi dies mid-game: reconnect and carry on, and a rule for walking away |
+| Piece | Why | Status |
+|---|---|---|
+| A room per game | Somewhere both players connect to, holding the one true game | **built** |
+| A live connection | A line that stays open, rather than each browser repeatedly asking "anything new?" | **built** |
+| Referee logic | Checking moves, running the clocks, declaring results | **built** |
+| Invite links | Create a game, send a link, whoever opens it takes the other side | **built** |
+| Dropout handling | Wifi dies mid-game: reconnect and carry on, and a rule for walking away | **built** |
+| A screen for it | Somewhere to press "play a friend", and a board that talks to the room | not started |
 
 The spec already chose the technology (§13.2): **Cloudflare Durable Objects**,
 which is built almost exactly for this. One small consistent "room" per match,
@@ -106,6 +107,22 @@ rooms cost nothing while they sleep. The free tier covers early use.
 
 **No accounts needed.** "Play a friend by link" works with strangers and no
 sign-up, and it is the right first online feature.
+
+### What has been built
+
+The referee itself, and the thing it runs inside — `packages/referee` and
+`apps/server`. It creates matches, hands out invite links, checks every move
+against the same rules the browser uses, runs both clocks, survives a player's
+wifi dying and hands the game to whoever is still there when a clock runs out.
+It has been driven end to end on Cloudflare's own runtime, not only in tests.
+
+**What it does not have is a screen.** Nothing in the app talks to it yet: there
+is no "play a friend" button and no join page. That is the next piece of work,
+and it is a smaller one — the hard half, which is being certain that neither
+player can lie about what happened, is done.
+
+`docs/ONLINE.md` is the reference: what the two sides say to each other, what
+the room refuses, how to run it, and the three things still waiting on Vig.
 
 ---
 

@@ -1,0 +1,24 @@
+# The referee's deployment. `pnpm --filter @sps/server dev` runs it locally on
+# workerd — the same runtime Cloudflare runs, including real hibernation.
+name = "sps-referee"
+main = "src/index.ts"
+compatibility_date = "2026-09-22"
+
+# One object per match (spec 13.2). `new_sqlite_classes` rather than
+# `new_classes` because the SQLite-backed storage is what the free plan offers,
+# and it is the one Cloudflare now recommends for new objects either way.
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "MatchRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MatchRoom"]
+
+[vars]
+# Where the web app is served from, so an invite link points at the game and
+# not at this API. Set it per environment before sharing any link.
+APP_ORIGIN = "http://localhost:5173"
+# Which origin may call the JSON endpoints from a browser. Narrow it in
+# production; the websocket is not subject to this either way.
+ALLOWED_ORIGIN = "*"
