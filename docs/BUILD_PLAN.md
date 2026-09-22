@@ -326,6 +326,50 @@ folded in here.
 on the human's own turn — verified by playing one exchange and undoing it
 back to the empty history. It did not refund clock time; **M4b below does.**
 
+## Accent contrast, and a gate for it
+
+`.play` was white on `--blue`, which is 2.52:1 in the dark theme because that
+theme's blue is a *light* blue. Auditing the rest with the repo's own
+`contrastRatio` found it was not one button: **four of the five filled accents
+were below WCAG AA (spec 10.10), and two of those failed in the LIGHT theme**,
+so this was never a dark-mode problem.
+
+| | |
+|---|---|
+| white on `--blue` (light) | 4.73:1 — the only pass |
+| white on `--blue` (dark) | 2.52:1 |
+| white on `--red` (light) | 4.41:1 |
+| white on `--red` (dark) | 2.89:1 |
+| white on `--alert` (both) | 3.78:1 |
+
+**Contrast is symmetric, which made the fix much smaller than it looked.** A
+colour that fails carrying white also fails *as text* on white — so `--alert`
+at 3.78:1 was illegible both as the low-clock fill and as the "last one" count.
+Darkening `--red` by 2% and `--alert` by 10% fixes each in both roles at once,
+which is why there are no separate fill tokens: the accents simply became the
+versions that pass. Spec 10.3 marks these values "adapt freely", and the
+board's own piece colours are untouched — those come from `@sps/board`'s
+validated swatches, so nothing moved off the 3:1 floor against the squares.
+
+One new token, `--on-fill`, is what sits ON a filled accent: white in the light
+theme, near-black in the dark one. One per theme rather than one per accent,
+because a single foreground clears AA on all three. The six sites that
+hard-coded `color: white` now use it.
+
+**`.play:hover` stopped brightening the fill.** `brightness()` on a filled
+accent moves it toward its own foreground and quietly spends the contrast this
+change just bought. It lifts with a shadow instead, which changes no colour
+pair at all.
+
+**The gate.** `apps/web` had no test directory; `vitest.config.ts` now includes
+`apps/*/test`, and `tokens.test.ts` parses `styles.css` — rather than
+duplicating the values — and asserts every accent clears AA both as text on
+the page and under `--on-fill`, in both themes. It also fails on any
+`color: white` in either stylesheet, because that is exactly how this broke:
+it reads as obviously right on a blue button and is wrong in whichever theme
+owns the light accent. Verified by reverting `--red` and watching it fail with
+the original 4.41:1.
+
 ## The Rail layout and Zen
 
 Two things `docs/VISUAL_SYSTEM.md` decision 4 had deferred past M3, built

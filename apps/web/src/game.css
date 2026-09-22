@@ -139,7 +139,7 @@
 .panel--red .panel-dot { color: var(--red); }
 
 .panel-counts { display: flex; gap: 0.6rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.count--last { color: var(--alert, #b0781c); }
+.count--last { color: var(--alert); }
 .count--out { color: var(--muted); text-decoration: line-through; }
 
 .status {
@@ -220,7 +220,7 @@
   margin: 0;
   border: 1px solid var(--blue);
   background: var(--blue);
-  color: white;
+  color: var(--on-fill);
 }
 
 /* Illegal-target shake — spec 10.4: "a gentle shake". Respects the global
@@ -266,11 +266,11 @@
   border-radius: 6px;
   background: var(--square-alt);
 }
-.clock-chip--running { background: var(--blue); color: white; }
-.clock-chip--low { color: var(--alert, #b0781c); }
-.clock-chip--running.clock-chip--low { background: var(--alert, #b0781c); color: white; }
+.clock-chip--running { background: var(--blue); color: var(--on-fill); }
+.clock-chip--low { color: var(--alert); }
+.clock-chip--running.clock-chip--low { background: var(--alert); color: var(--on-fill); }
 .clock-chip--critical { color: var(--red); font-weight: 700; }
-.clock-chip--running.clock-chip--critical { background: var(--red); color: white; }
+.clock-chip--running.clock-chip--critical { background: var(--red); color: var(--on-fill); }
 
 .clock-chip .gift {
   width: 18px;
@@ -370,7 +370,7 @@
   cursor: pointer;
 }
 .movelist-move:hover { background: var(--square-alt); }
-.movelist-move--on { background: var(--blue); color: white; }
+.movelist-move--on { background: var(--blue); color: var(--on-fill); }
 
 /* Review stepper — spec 10.8's arrows and jump-to-ends, as buttons so the
    feature exists on a touchscreen too, not only under a keyboard. */
