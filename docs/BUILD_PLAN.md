@@ -11,7 +11,7 @@ the previous milestone's "done when" holds.**
 | M0 | Scaffold: workspace, packages, fixtures, test harness | `pnpm test`, `pnpm typecheck` and `pnpm build` all green | **done** |
 | M1 | Engine: rules, position notation, move notation, events, `isSealed` | §11.1–§11.4 green, perft matches | **done** |
 | M2 | AI and the `tools/sim` harness | Balance runs land near §6 for all three variants | **built** |
-| M3 | Board UI and pass-and-play, Original only | Two people can finish a game on one phone | **M3a done, M3b next** |
+| M3 | Board UI and pass-and-play, Original only | Two people can finish a game on one phone | **gate met (§ below); M3c next** |
 | C1 | Clocks, offers and time gifts (`docs/ADDENDUM-CLOCKS.md`) | Clock, offers and gift policy green; engine still timer-free | **done** |
 | C2 | Premove, abort, low-time warning, Zen | Logic green; rendering waits on M3 | **done** |
 | M4 | Play against the computer: worker, three levels, undo | Hard stays inside its time budget on a phone | |
@@ -181,6 +181,60 @@ Two things worth knowing before extending it:
 "yours", hollow disc / filled mark for the opponent) reads clearly even at a
 390px phone's actual square size in `apps/web` — confirmed by rendering it and
 looking, not assumed from the fraction arithmetic alone.
+
+## What M3b left behind — the gate is met
+
+**Two people can finish a game of Original on one phone.** `Game.tsx` runs a
+complete pass-and-play loop: tap or drag to move, the same keyboard cursor
+spec 10.4 describes (arrows, Enter/Space, Escape), illegal-target reasons with
+a shake, the 150ms slide, the three capture motions with a victim overlay,
+corner names and type counts, Undo and Resign. Verified by actually playing
+it through Playwright rather than trusting the code — a full capture, found
+by running the real AI a few plies deep (hand-tracing a legal capture from the
+opening position is exactly the kind of thing worth generating instead of
+guessing at), replayed through real clicks with zero console errors.
+
+**One real bug, caught the same way the M3a scissors one was — by driving the
+app, not by reading the code.** The first version had `pointerdown` eagerly
+select whatever piece it landed on, so a drag could show a ghost from the
+moment of press. It couldn't: pressing a piece set `selected`, and releasing
+on that same square — now seeing it as "the selected one" — matched the
+"tap the selected piece again" branch and cleared it right back out, all
+within one click. Taps looked like they did nothing. The fix is in `Game.tsx`'s
+comment above `onPointerDown`: one state change per gesture, decided entirely
+on release, not two racing on press and release of the same tap. `packages/board`'s
+tests didn't and couldn't catch this — the bug was in how `apps/web` sequenced
+its own state, not in anything pure enough to unit test.
+
+**What's a real, documented simplification rather than a miss:**
+
+* **Corner-anchored names.** `docs/VISUAL_SYSTEM.md` 5 describes names sitting
+  beside each player's own corner. `Game.tsx` stacks two panels instead
+  (opponent above the board, yours below — spec 10.11's own phone layout).
+  Functionally the same information; the corner-precise positioning is
+  deferred rather than rushed.
+* **Cut's victim doesn't split into two halves.** The captor's motion is the
+  real thing (README 3b's rotate-close); the taken piece fades and scales
+  instead of splitting, because a true split needs its own geometry per
+  family and this pass owns getting the mechanism working, not every
+  family's exact silhouette break.
+* **No board flip.** Pass-and-play always shows Blue's corner bottom-left.
+  Spec 10.2's "flip each turn" toggle needs orientation-aware square mapping
+  that nothing in `@sps/board` does yet — a real feature, not a bug, and
+  worth its own pass rather than a rushed half-version here.
+* **Move list and the full game-over overlay (Rematch, Swap sides, Review,
+  Copy link) aren't built.** The status line and a plain result sentence are
+  what M3's gate actually needed; the four-button overlay in spec 10.7 pairs
+  naturally with M3c's offer/rematch work and is picked up there.
+
+`@sps/board` grew three pure, tested pieces for this: `motion.ts`
+(`captureMotion`, matchup -> name, nothing else), `text.ts` (spec 10.4's two
+illegal-capture reasons, verbatim), and `render.ts`'s `selection`/`focusSquare`
+options (the dot, the two rings, the dashed cursor — still a function of what
+to draw, never of when). Everything about *when* — the gesture state machine,
+the two WAAPI animations, the victim overlay — has no DOM to live in inside
+`@sps/board`, so it's `apps/web`'s, same split M3a drew for motion's naming
+versus its timing.
 
 ## What M1 left behind
 

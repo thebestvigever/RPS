@@ -1,0 +1,93 @@
+/* M3b — pass-and-play (docs/VISUAL_SYSTEM.md 8). The board's own tokens live
+   in @sps/board's themes.ts; this is only the app-level chrome and the two
+   animations @sps/board has no DOM to define (motion.ts names them, this
+   times and shapes them). */
+
+.game {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 0.5rem 0 2rem;
+}
+
+.back {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  padding: 0.25rem 0;
+}
+.back:hover { color: var(--ink); }
+
+.board-wrap {
+  position: relative; /* victim-overlay positions against this */
+  touch-action: none; /* dragging shouldn't scroll the page on a phone */
+}
+.board-wrap:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.board-wrap svg { display: block; width: 100%; height: 100%; }
+
+.panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  font-size: 0.9rem;
+}
+.panel-name { font-weight: 600; }
+.panel-counts { display: flex; gap: 0.6rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.count--last { color: var(--alert, #b0781c); }
+.count--out { color: var(--muted); text-decoration: line-through; }
+
+.status {
+  min-height: 1.4em;
+  font-size: 0.95rem;
+  text-align: center;
+  margin: 0;
+}
+
+.bar {
+  display: flex;
+  gap: 0.5rem;
+}
+.bar button {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  border: 1px solid var(--grid);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+.bar button:disabled { opacity: 0.35; cursor: not-allowed; }
+.bar button.resign { color: var(--red); border-color: var(--red); }
+
+.game-over {
+  margin-top: 0.5rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--grid);
+  border-radius: 8px;
+  text-align: center;
+  font-weight: 600;
+}
+
+/* Illegal-target shake — spec 10.4: "a gentle shake". Respects the global
+   prefers-reduced-motion override in styles.css (it disables all `animation`). */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
+.board-wrap [data-square].shake {
+  animation: shake 130ms ease-in-out 2;
+}
+
+.victim-overlay {
+  position: absolute;
+  pointer-events: none;
+}

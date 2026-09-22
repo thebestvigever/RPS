@@ -153,3 +153,80 @@ describe('unbuilt families throw a clear, specific error instead of a wrong rend
     });
   }
 });
+
+describe('selection (M3b, spec 10.4)', () => {
+  const base = {
+    fen: VARIANTS.original.start,
+    variant: VARIANTS.original,
+    boardPx: 560,
+    theme: 'field-notes' as const,
+    family: 'cut-stone' as const,
+    appearance: { sideColors, viewerSide: 'blue' as const },
+  };
+
+  it('draws a selection ring and a legal dot for a plain destination', () => {
+    const from = parseSquare('d4'); // Blue Paper's starting square
+    const to = parseSquare('d5'); // empty, one step, plain move
+    const svg = renderBoard({ ...base, selection: { square: from, destinations: [{ square: to, capture: false }] } });
+    expect(svg).toContain('stroke="' + sideColors.blue + '"'); // the selection ring
+    expect(svg.match(/fill-opacity="0\.\d+"/g)?.length ?? 0).toBeGreaterThan(0); // the derived dot alpha
+  });
+
+  it('draws a capture ring (not a dot) for a capturing destination', () => {
+    // A hand-picked position where Blue's Rock on d4 can capture Red's Scissors on e5.
+    const svg = renderBoard({
+      ...base,
+      fen: '9/9/9/9/4S4/3R5/9/9/9 blue',
+      selection: {
+        square: parseSquare('d3'),
+        destinations: [{ square: parseSquare('e4'), capture: true }],
+      },
+    });
+    // A capture ring is a stroked circle with no dot fill-opacity at that square.
+    expect(svg).toContain('fill="none"');
+  });
+
+  it('renders no selection markup when selection is null', () => {
+    const withSel = renderBoard({
+      ...base,
+      selection: { square: parseSquare('d4'), destinations: [{ square: parseSquare('d5'), capture: false }] },
+    });
+    const without = renderBoard({ ...base, selection: null });
+    expect(withSel.length).toBeGreaterThan(without.length);
+  });
+
+  it('the selected square\'s ring uses the piece owner\'s colour, not always the viewer\'s', () => {
+    const redSquare = parseSquare('h6'); // Red Rock's starting square
+    const svg = renderBoard({ ...base, selection: { square: redSquare, destinations: [] } });
+    expect(svg).toContain('stroke="' + sideColors.red + '"');
+  });
+});
+
+describe('keyboard focus ring (M3b, spec 10.10)', () => {
+  it('renders a dashed ring only when focusSquare is set', () => {
+    const base = {
+      fen: VARIANTS.original.start,
+      variant: VARIANTS.original,
+      boardPx: 560,
+      theme: 'field-notes' as const,
+      family: 'cut-stone' as const,
+      appearance: { sideColors, viewerSide: 'blue' as const },
+    };
+    const withFocus = renderBoard({ ...base, focusSquare: parseSquare('e5') });
+    const without = renderBoard({ ...base, focusSquare: null });
+    expect(withFocus).toContain('stroke-dasharray');
+    expect(without).not.toContain('stroke-dasharray');
+  });
+
+  it('focusSquare 0 (a9, a real square) is not treated as falsy', () => {
+    const base = {
+      fen: VARIANTS.original.start,
+      variant: VARIANTS.original,
+      boardPx: 560,
+      theme: 'field-notes' as const,
+      family: 'cut-stone' as const,
+      appearance: { sideColors, viewerSide: 'blue' as const },
+    };
+    expect(renderBoard({ ...base, focusSquare: 0 })).toContain('stroke-dasharray');
+  });
+});

@@ -29,3 +29,21 @@ export const KNOCKOUT_RING_STROKE_FRACTION = 0.03;
 /** A neutral piece's ring, dashed rather than solid or absent (spec 10.3) — same diameter as the standalone opponent ring, any mode. */
 export const NEUTRAL_RING_DIAMETER_FRACTION = STANDALONE_RING_DIAMETER_FRACTION;
 export const NEUTRAL_RING_DASH_FRACTION = 0.06; // dash length, as a fraction of the square
+
+// --- Selection aids (spec 10.4, 10.5) — board-level, so independent of
+// render mode and piece family; only the square matters.
+
+/** "selection outline = 2px solid the colour" (README 2), scaled like the ownership ring. */
+export const SELECTION_RING_STROKE_FRACTION = STANDALONE_RING_STROKE_FRACTION;
+
+/** Legal-move dot: "20% of square" (spec 10.5). Its alpha is derived per colour (contrast.ts's `dotAlpha`), not fixed. */
+export const LEGAL_DOT_DIAMETER_FRACTION = 0.2;
+
+/** Capture ring: "80% of the square, 2.5-3px" (spec 10.5). */
+export const CAPTURE_RING_DIAMETER_FRACTION = 0.8;
+export const CAPTURE_RING_STROKE_FRACTION = 0.045; // lands in 2.5-3px at the sizes spec 10.2 allows
+
+/** The keyboard focus cursor — a visible ring distinct from selection's (spec 10.10), dashed so it never reads as an ownership or selection cue. */
+export const FOCUS_RING_DIAMETER_FRACTION = 0.92;
+export const FOCUS_RING_STROKE_FRACTION = 0.03;
+export const FOCUS_RING_DASH_FRACTION = 0.05;

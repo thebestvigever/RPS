@@ -4,9 +4,11 @@
 // markup, which is what lets this render directly against the engine's own
 // fixtures in test/render.test.ts rather than needing a running game.
 //
-// M3a's scope only: tokens, coordinates, corner tints, the last-move tint and
-// the flame placeholder. Selection, legal-move dots, capture rings and motion
-// are M3b (docs/VISUAL_SYSTEM.md 8) and are not drawn here yet.
+// M3a covered tokens, coordinates, corner tints, the last-move tint and the
+// flame placeholder. M3b adds selection, the legal-move dot and capture ring,
+// and the keyboard focus ring — all still a pure function of what to draw;
+// the interaction that decides WHEN to draw them (clicks, drags, arrow keys)
+// lives in apps/web, same as the motion this package only names (motion.ts).
 
 import {
   EMPTY,
@@ -25,12 +27,20 @@ import type { PieceType, Side, Square, VariantConfig } from '@sps/engine';
 import { CORNER_TINT_ALPHA, LAST_MOVE_TINT_ALPHA, THEMES, type ThemeId } from './themes.js';
 import { familyMark, type Family, type FamilyId } from './families.js';
 import { renderMode, type RenderMode } from './ownership.js';
+import { dotAlpha } from './contrast.js';
 import {
+  CAPTURE_RING_DIAMETER_FRACTION,
+  CAPTURE_RING_STROKE_FRACTION,
+  FOCUS_RING_DASH_FRACTION,
+  FOCUS_RING_DIAMETER_FRACTION,
+  FOCUS_RING_STROKE_FRACTION,
   KNOCKOUT_DISC_FRACTION,
   KNOCKOUT_MARK_FRACTION,
   KNOCKOUT_RING_STROKE_FRACTION,
+  LEGAL_DOT_DIAMETER_FRACTION,
   NEUTRAL_RING_DASH_FRACTION,
   NEUTRAL_RING_DIAMETER_FRACTION,
+  SELECTION_RING_STROKE_FRACTION,
   STANDALONE_BOX_FRACTION,
   STANDALONE_RING_DIAMETER_FRACTION,
   STANDALONE_RING_STROKE_FRACTION,
@@ -51,6 +61,17 @@ export interface Appearance {
   viewerSide: Side;
 }
 
+export interface SelectionDestination {
+  square: Square;
+  /** A legal-move dot when false, a capture ring when true (spec 10.4). */
+  capture: boolean;
+}
+
+export interface Selection {
+  square: Square;
+  destinations: readonly SelectionDestination[];
+}
+
 export interface RenderOptions {
   fen: string;
   variant: VariantConfig;
@@ -63,6 +84,10 @@ export interface RenderOptions {
   coordinates?: boolean;
   /** Origin and destination of the last move, spec 10.2 / 10.5. */
   lastMove?: { from: Square; to: Square } | null;
+  /** The selected piece and its legal destinations — dots for a plain move, rings for a capture (spec 10.4). */
+  selection?: Selection | null;
+  /** The keyboard focus cursor (spec 10.4/10.10) — a visible ring distinct from selection's. */
+  focusSquare?: Square | null;
 }
 
 export function renderBoard(options: RenderOptions): string {
@@ -75,6 +100,8 @@ export function renderBoard(options: RenderOptions): string {
     appearance,
     coordinates = true,
     lastMove = null,
+    selection = null,
+    focusSquare = null,
   } = options;
 
   const themeTokens = THEMES[themeId];
@@ -101,6 +128,8 @@ export function renderBoard(options: RenderOptions): string {
       squarePx,
     ),
     coordinates ? coordinatesLayer(boardPx, squarePx, themeTokens.muted, themeTokens.fonts.mono) : '',
+    selection ? selectionLayer(selection, state.board, appearance.sideColors, themeTokens.square, squarePx) : '',
+    focusSquare != null ? focusLayer(focusSquare, themeTokens.ink, squarePx) : '',
   ];
 
   return group(
@@ -178,6 +207,98 @@ function lastMoveLayer(lastMove: { from: Square; to: Square }, ink: string, squa
     });
   });
   return group('g', {}, rects.join(''));
+}
+
+/**
+ * The selected piece's outline, a legal-move dot on each plain destination
+ * and a capture ring on each destination that takes something (spec 10.4).
+ * The dot's alpha is derived per the mover's actual colour (`dotAlpha`),
+ * not fixed — the handoff's own 55% measured 1.62-2.42:1 against these
+ * squares (docs/VISUAL_SYSTEM.md 3).
+ */
+function selectionLayer(
+  selection: Selection,
+  board: Int8Array,
+  sideColors: Record<Side, string>,
+  squareColor: string,
+  squarePx: number,
+): string {
+  const code = board[selection.square]!;
+  const piece = code === EMPTY ? null : decodePiece(code);
+  const color = piece && piece.owner !== 'neutral' ? sideColors[piece.owner] : Object.values(sideColors)[0]!;
+
+  const parts: string[] = [selectionRing(selection.square, color, squarePx)];
+
+  for (const destination of selection.destinations) {
+    parts.push(
+      destination.capture
+        ? captureRing(destination.square, color, squarePx)
+        : legalDot(destination.square, color, squareColor, squarePx),
+    );
+  }
+
+  return group('g', {}, parts.join(''));
+}
+
+function selectionRing(square: Square, color: string, squarePx: number): string {
+  const { x, y } = squareXY(square, squarePx);
+  const stroke = Math.max(1, squarePx * SELECTION_RING_STROKE_FRACTION);
+  return el('rect', {
+    x: round(x + stroke / 2),
+    y: round(y + stroke / 2),
+    width: round(squarePx - stroke),
+    height: round(squarePx - stroke),
+    fill: 'none',
+    stroke: color,
+    'stroke-width': round(stroke),
+  });
+}
+
+function legalDot(square: Square, color: string, squareColor: string, squarePx: number): string {
+  const { x, y } = squareXY(square, squarePx);
+  const diameter = squarePx * LEGAL_DOT_DIAMETER_FRACTION;
+  return el('circle', {
+    cx: round(x + squarePx / 2),
+    cy: round(y + squarePx / 2),
+    r: round(diameter / 2),
+    fill: color,
+    'fill-opacity': dotAlpha(color, squareColor),
+  });
+}
+
+function captureRing(square: Square, color: string, squarePx: number): string {
+  const { x, y } = squareXY(square, squarePx);
+  const diameter = squarePx * CAPTURE_RING_DIAMETER_FRACTION;
+  const stroke = Math.max(1, squarePx * CAPTURE_RING_STROKE_FRACTION);
+  return el('circle', {
+    cx: round(x + squarePx / 2),
+    cy: round(y + squarePx / 2),
+    r: round((diameter - stroke) / 2),
+    fill: 'none',
+    stroke: color,
+    'stroke-width': round(stroke),
+  });
+}
+
+/** The keyboard cursor — dashed, so it's never confused with selection's solid ring or ownership's cue (spec 10.10). */
+function focusLayer(square: Square, ink: string, squarePx: number): string {
+  const { x, y } = squareXY(square, squarePx);
+  const diameter = squarePx * FOCUS_RING_DIAMETER_FRACTION;
+  const stroke = Math.max(1, squarePx * FOCUS_RING_STROKE_FRACTION);
+  const dash = Math.max(1, squarePx * FOCUS_RING_DASH_FRACTION);
+  return group(
+    'g',
+    {},
+    el('circle', {
+      cx: round(x + squarePx / 2),
+      cy: round(y + squarePx / 2),
+      r: round((diameter - stroke) / 2),
+      fill: 'none',
+      stroke: ink,
+      'stroke-width': round(stroke),
+      'stroke-dasharray': `${round(dash)} ${round(dash)}`,
+    }),
+  );
 }
 
 /**

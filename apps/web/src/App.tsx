@@ -1,31 +1,36 @@
 import { useMemo, useState } from 'react';
-import {
-  createGame,
-  legalMoves,
-  moveToText,
-  VARIANTS,
-  VARIANT_BLURBS,
-  VARIANT_IDS,
-} from '@sps/engine';
+import { VARIANTS, VARIANT_BLURBS, VARIANT_IDS } from '@sps/engine';
 import type { VariantId } from '@sps/engine';
-import Board, { defaultAppearance } from './Board.js';
+import Game from './Game.js';
+import { defaultAppearance } from './Board.js';
 import './styles.css';
 
-// docs/VISUAL_SYSTEM.md 8, M3a: static board rendering, one theme (Field
-// Notes), one family (Cut stone), Original's own layout. Selection, dragging,
-// legal-move dots and motion are M3b — this page still only shows a position,
-// it does not yet let you play one.
-//
-// It reads everything from the engine rather than hard-coding it, which is
-// the point: variants are data, and the app never restates the rules.
+// Home -> Game, spec 10.1's two smallest screens. M3b's gate (docs/VISUAL_SYSTEM.md
+// 8, BUILD_PLAN.md): two people finish a game of Original on one phone. The
+// variant picker offers all three because nothing in Game.tsx is Original-
+// specific — it plays a Move wherever legalMoves() says one exists, which
+// already covers a neutral capture and a 2x2 goal block for free. That is a
+// consequence of "variants are data" (CLAUDE.md), not separate M5 work pulled
+// forward; M5 is the polish these variants are still owed (the neutral pulse
+// cue, danger diamonds, the rest of spec 10.5's aids).
+type Screen = { name: 'home' } | { name: 'game'; variant: VariantId };
+
 export default function App() {
+  const [screen, setScreen] = useState<Screen>({ name: 'home' });
   const [selected, setSelected] = useState<VariantId>('original');
   const appearance = useMemo(defaultAppearance, []);
 
-  const opening = useMemo(() => {
-    const state = createGame(VARIANTS[selected]);
-    return legalMoves(state).map((move) => moveToText(state, move));
-  }, [selected]);
+  if (screen.name === 'game') {
+    return (
+      <Game
+        variant={VARIANTS[screen.variant]}
+        theme="field-notes"
+        family="cut-stone"
+        appearance={appearance}
+        onExit={() => setScreen({ name: 'home' })}
+      />
+    );
+  }
 
   return (
     <main>
@@ -55,24 +60,14 @@ export default function App() {
         </section>
       ))}
 
-      <Board
-        fen={VARIANTS[selected].start}
-        variant={VARIANTS[selected]}
-        boardPx={360}
-        theme="field-notes"
-        family="cut-stone"
-        appearance={appearance}
-      />
+      <button className="play" type="button" onClick={() => setScreen({ name: 'game', variant: selected })}>
+        Play pass-and-play — {VARIANTS[selected].name}
+      </button>
 
       <div className="status">
         <p>
-          Engine and computer opponent are done. Blue has <strong>{opening.length}</strong>{' '}
-          legal opening moves in {VARIANTS[selected].name}.
-        </p>
-        <p className="moves">{opening.join('  ')}</p>
-        <p>
-          Selecting, dragging, legal-move dots, capture motion and the clock
-          furniture are next (M3b/M3c, docs/VISUAL_SYSTEM.md 8).
+          vs Computer is next (M4). Aids beyond type counts — threat lines, the
+          race meter, the Keep lock — are M6.
         </p>
       </div>
     </main>
