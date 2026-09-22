@@ -1,4 +1,5 @@
-// Pass-and-play — spec 10.1 "Game" screen, M3b (docs/VISUAL_SYSTEM.md 8).
+// Pass-and-play and vs-computer — spec 10.1 "Game" screen (docs/VISUAL_SYSTEM.md
+// 8, M3b/M3c/M4).
 //
 // This is where the state machine spec 10.4 describes lives: tap to select,
 // tap a destination to move, tap the piece again or empty space to cancel,
@@ -11,7 +12,9 @@
 // @sps/board stays pure — it draws whatever `selection`/`focusSquare` say to.
 // Everything about WHEN those change, and the two animations layered on top
 // (the 150ms slide, the capture motion), is DOM work that has no business in
-// a package with no DOM, so it lives here.
+// a package with no DOM, so it lives here. The computer opponent (M4) reuses
+// every bit of this: its move arrives from the worker as text, gets parsed
+// into the same Move type a tap produces, and goes through the same `doMove`.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -25,12 +28,13 @@ import {
   legalMoves,
   moveToText,
   other,
+  parseMove,
   replay,
   resign as engineResign,
   toFen,
   typeCounts,
 } from '@sps/engine';
-import type { GameState, Move, PieceType, Side, Square, VariantConfig } from '@sps/engine';
+import type { GameRecord, GameState, Move, PieceType, Side, Square, VariantConfig } from '@sps/engine';
 import {
   MOTION_MS,
   THEMES,
@@ -61,17 +65,30 @@ import {
   stop as stopClock,
   urgencyOf,
 } from '@sps/match';
-import type { ClockState, OfferState, TimeControl, Urgency } from '@sps/match';
+import type { ClockState, MatchMode, OfferState, TimeControl, Urgency } from '@sps/match';
+import { shouldAcceptDraw } from '@sps/ai';
+import type { FromWorker, Level, ToWorker } from '@sps/ai';
 import { clampSquare, slideOffsetPx, squareAt } from './board-geometry.js';
 import { describeResult, describeTurn, whoseTurn } from './announce.js';
 import { formatClock } from './clock-format.js';
+import { createAiWorker } from './ai-worker.js';
 import './game.css';
 
-const MODE = 'pass-and-play' as const;
+export interface Computer {
+  side: Side;
+  level: Level;
+}
+
+function randomSeed(): number {
+  return Math.floor(Math.random() * 2 ** 31);
+}
 
 export interface GameProps {
   variant: VariantConfig;
   control: TimeControl;
+  /** null for pass-and-play. Set, this side is the computer's — always Red for
+   * now (see the note above `humanSide` below for why). */
+  computer: Computer | null;
   theme: ThemeId;
   family: FamilyId;
   appearance: Appearance;
@@ -161,12 +178,21 @@ function victimKeyframes(motion: MotionKind): Keyframe[] {
   return [{ opacity: 1 }, { opacity: 0 }]; // wrap: fades under the captor
 }
 
-export default function Game({ variant, control, theme, family, appearance, onExit }: GameProps) {
+export default function Game({ variant, control, computer, theme, family, appearance, onExit }: GameProps) {
   const boardPx = useBoardPx();
   const squarePx = boardPx / 9;
   const reducedMotion = usePrefersReducedMotion();
   const containerRef = useRef<HTMLDivElement>(null);
   const dragOriginRef = useRef<Square | null>(null);
+  const workerRef = useRef<Worker | null>(null);
+
+  const mode: MatchMode = computer ? 'vs-computer' : 'pass-and-play';
+  // Always Red for now: spec 10.2 rotates the board 180 degrees for a human
+  // playing Red, and no @sps/board release yet does board orientation (M3b's
+  // own documented cut). Letting the human choose Red before that exists
+  // would show their own pieces starting at the far corner — worse than not
+  // offering the choice. Home's side picker arrives with orientation.
+  const humanSide: Side = computer ? other(computer.side) : 'blue';
 
   const [history, setHistory] = useState<string[]>([]);
   const [gameState, setGameState] = useState<GameState>(() => createGame(variant));
@@ -176,15 +202,20 @@ export default function Game({ variant, control, theme, family, appearance, onEx
   const [lastMove, setLastMove] = useState<{ from: Square; to: Square } | null>(null);
   const [anim, setAnim] = useState<PendingAnim | null>(null);
   const [clock, setClock] = useState<ClockState>(() => startTurn(createClock(control), 'blue', Date.now()));
-  const [offers, setOffers] = useState<OfferState>(() => createOffers(OFFER_POLICIES[MODE]));
+  const [offers, setOffers] = useState<OfferState>(() => createOffers(OFFER_POLICIES[mode]));
   const [now, setNow] = useState(() => Date.now());
+  const [thinking, setThinking] = useState(false);
 
   const legal = useMemo(() => legalMoves(gameState), [gameState]);
   const fen = useMemo(() => toFen(gameState), [gameState]);
   const counts = useMemo(() => typeCounts(gameState), [gameState]);
   const gameOver = gameState.result != null;
+  const humanTurn = gameState.turn === humanSide;
 
-  const isSelectable = useCallback((square: Square) => legal.some((m) => m.from === square), [legal]);
+  const isSelectable = useCallback(
+    (square: Square) => humanTurn && legal.some((m) => m.from === square),
+    [legal, humanTurn],
+  );
 
   const selection = useMemo(() => {
     if (selected == null) return null;
@@ -375,12 +406,19 @@ export default function Game({ variant, control, theme, family, appearance, onEx
 
   function undo() {
     if (history.length === 0 || gameOver) return;
-    const nextHistory = history.slice(0, -1);
+    // Against the computer, Undo takes back your move AND its reply — two
+    // plies (spec 10.8) — so you land back on your own turn, not its.
+    // Exactly one ply is available while the reply hasn't arrived yet
+    // (`thinking`): only your move exists to take back, and the effect
+    // above cancels the in-flight think as soon as `history` changes.
+    const plies = computer && !thinking && history.length >= 2 ? 2 : 1;
+    const nextHistory = history.slice(0, -plies);
     const replayed = replay(variant, nextHistory);
     setHistory(nextHistory);
     setGameState(replayed.state);
     setSelected(null);
     setAnim(null);
+    setThinking(false);
     const lastEvents = replayed.events.at(-1);
     const moveEvent = lastEvents?.find((e): e is Extract<typeof e, { type: 'move' }> => e.type === 'move');
     setLastMove(moveEvent ? { from: moveEvent.from, to: moveEvent.to } : null);
@@ -403,7 +441,7 @@ export default function Game({ variant, control, theme, family, appearance, onEx
 
   function doAbort() {
     if (gameOver) return;
-    if (!canAbort(gameState.ply, MODE).ok) return;
+    if (!canAbort(gameState.ply, mode).ok) return;
     const aborted = abortGame(gameState);
     setGameState(aborted);
     setSelected(null);
@@ -439,31 +477,43 @@ export default function Game({ variant, control, theme, family, appearance, onEx
     }
   }
 
+  // The button beside your OWN clock, playing the computer, is the
+  // addendum's self-gift ("nobody to cheat") — from and to are the same
+  // side. Every other case (either clock in pass-and-play, or the
+  // computer's clock playing it) is the courtesy: from the other side. Both
+  // happen to be permitted in vs-computer mode, so this doesn't change
+  // whether either button is live — but `clock.gifts` is supposed to tell
+  // the truth about who gave what (spec 8.3), and only one of the two is true.
+  function giftFrom(to: Side): Side {
+    return computer && to === humanSide ? to : other(to);
+  }
+
   function giveTimeTo(to: Side) {
-    const from = other(to); // spec's own framing: the button beside a clock gifts it FROM the other side.
-    if (!canGive(GIFT_POLICIES[MODE], from, to).ok) return;
-    setClock((c) => giveTime(c, { ply: gameState.ply, from, to, ms: GIFT_POLICIES[MODE].ms }));
+    const from = giftFrom(to);
+    if (!canGive(GIFT_POLICIES[mode], from, to).ok) return;
+    setClock((c) => giveTime(c, { ply: gameState.ply, from, to, ms: GIFT_POLICIES[mode].ms }));
   }
 
   function doRematch() {
-    // One click, not an offer/accept pair: pass-and-play has both players at
-    // the device already, so there is nothing to negotiate the way a mid-game
-    // draw does — offers.ts's 'rematch' kind is for a mode where the two
-    // players aren't already agreeing in person (M5+'s online play).
+    // One click, not an offer/accept pair: both players (or the one player
+    // and the computer) are already right here, so there is nothing to
+    // negotiate the way a mid-game draw does — offers.ts's 'rematch' kind is
+    // for a mode where the two sides aren't already agreeing in person
+    // (M5+'s online play).
     //
-    // Not "sides swapped" (spec 10.7's other rematch button): the panels are
-    // labelled Blue/Red, not "you"/"opponent" — pass-and-play has no notion
-    // of which physical player is which side to swap, since nothing here
-    // tracks identity across a rematch. Swapping becomes meaningful once vs-
-    // computer (M4) gives colour an actual owner.
+    // Not "sides swapped" (spec 10.7's other rematch button) even now that
+    // vs-computer exists: swapping needs board orientation (M3b's documented
+    // cut — a Red-playing human needs the board rotated, spec 10.2), which
+    // still doesn't exist. The computer stays whichever side it started as.
     setHistory([]);
     setGameState(createGame(variant));
     setSelected(null);
     setAnim(null);
     setLastMove(null);
-    setOffers(createOffers(OFFER_POLICIES[MODE]));
+    setOffers(createOffers(OFFER_POLICIES[mode]));
     setClock(startTurn(createClock(control), 'blue', Date.now()));
     setStatus(whoseTurn('blue'));
+    setThinking(false);
   }
 
   // --- The clock: ticks `now` for a live display, and is the one place that
@@ -490,6 +540,78 @@ export default function Game({ variant, control, theme, family, appearance, onEx
     }, 250);
     return () => window.clearInterval(interval);
   }, [gameOver, control.unlimited, clock]);
+
+  // --- The computer opponent (M4): one worker for the component's life
+  // (spec 9.4, "search never blocks the board"), a message handler kept
+  // current with the latest doMove, and a think-trigger that fires whenever
+  // it becomes the computer's side to move.
+  useEffect(() => {
+    const worker = createAiWorker();
+    workerRef.current = worker;
+    return () => {
+      worker.terminate();
+      workerRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const worker = workerRef.current;
+    if (!worker) return;
+    worker.onmessage = (event: MessageEvent<FromWorker>) => {
+      setThinking(false);
+      const move = parseMove(gameState, event.data.move);
+      doMove(move);
+    };
+  }, [gameState, doMove]);
+
+  useEffect(() => {
+    if (!computer || gameOver || gameState.turn !== computer.side || thinking) return;
+    const worker = workerRef.current;
+    if (!worker) return;
+    setThinking(true);
+    const record: GameRecord = {
+      game: 'stone-paper-scissors',
+      rulesVersion: 1,
+      variant: variant.id,
+      start: variant.start,
+      moves: history,
+    };
+    const message: ToWorker = { type: 'think', record, level: computer.level, seed: randomSeed() };
+    worker.postMessage(message);
+    // Cancels a think that's still in flight if the position changes before
+    // it replies — a legitimate Undo/Rematch mid-think, and also what makes
+    // StrictMode's dev-time double-effect safe: the first, cancelled attempt
+    // is never posted back (worker.ts's own generation counter), so this
+    // never doubles a move.
+    return () => {
+      const cancel: ToWorker = { type: 'cancel' };
+      worker.postMessage(cancel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [computer, gameState, gameOver, history, variant]);
+
+  // The computer answers a human's draw offer itself — spec's own draw.ts
+  // exists for exactly this. It never offers one on its own initiative.
+  useEffect(() => {
+    if (!computer || gameOver) return;
+    const pending = offers.pending;
+    if (!pending || pending.kind !== 'draw' || pending.by !== humanSide) return;
+    const timer = window.setTimeout(() => {
+      const decision = shouldAcceptDraw(gameState, computer.side, computer.level, randomSeed());
+      if (decision.accept) {
+        const outcome = acceptOffer(offers, computer.side);
+        setOffers(outcome.state);
+        settleDraw();
+      } else {
+        setOffers(declineOffer(offers, computer.side));
+        setStatus(`Computer declines — ${decision.reason}.`);
+      }
+      // A beat, not instant: an immediate answer reads as dismissive rather
+      // than considered, whatever the actual reasoning cost.
+    }, 500);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [computer, gameOver, offers, gameState, humanSide]);
 
   // --- Animation: the 150ms slide every move gets, and the matchup motion on
   // top of a capture. Pure arithmetic decides the slide offset (no DOM read
@@ -572,7 +694,7 @@ export default function Game({ variant, control, theme, family, appearance, onEx
         remainingMs={remainingAt(clock, 'red', now)}
         urgency={urgencyOf(clock, 'red', now)}
         running={clock.running === 'red'}
-        onGiveTime={canGive(GIFT_POLICIES[MODE], 'blue', 'red').ok ? () => giveTimeTo('red') : null}
+        onGiveTime={canGive(GIFT_POLICIES[mode], giftFrom('red'), 'red').ok ? () => giveTimeTo('red') : null}
       />
 
       <div
@@ -595,11 +717,11 @@ export default function Game({ variant, control, theme, family, appearance, onEx
         remainingMs={remainingAt(clock, 'blue', now)}
         urgency={urgencyOf(clock, 'blue', now)}
         running={clock.running === 'blue'}
-        onGiveTime={canGive(GIFT_POLICIES[MODE], 'red', 'blue').ok ? () => giveTimeTo('blue') : null}
+        onGiveTime={canGive(GIFT_POLICIES[mode], giftFrom('blue'), 'blue').ok ? () => giveTimeTo('blue') : null}
       />
 
       <p className="status" aria-live="polite">
-        {status}
+        {thinking ? 'Computer is thinking…' : status}
       </p>
 
       {drawOfferPending && !gameOver && (
@@ -621,12 +743,12 @@ export default function Game({ variant, control, theme, family, appearance, onEx
         <button
           type="button"
           onClick={offerDraw}
-          disabled={gameOver || drawOfferPending != null || !OFFER_POLICIES[MODE].allowed.includes('draw')}
+          disabled={gameOver || drawOfferPending != null || !OFFER_POLICIES[mode].allowed.includes('draw')}
           title="Offer draw"
         >
           ½
         </button>
-        <button type="button" onClick={doAbort} disabled={gameOver || !canAbort(gameState.ply, MODE).ok} title="Abort game">
+        <button type="button" onClick={doAbort} disabled={gameOver || !canAbort(gameState.ply, mode).ok} title="Abort game">
           ⊗
         </button>
         <button type="button" onClick={doResign} disabled={gameOver} className="resign" title="Resign">
