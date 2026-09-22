@@ -8,7 +8,7 @@ the previous milestone's "done when" holds.**
 | M0 | Scaffold: workspace, packages, fixtures, test harness | `pnpm test`, `pnpm typecheck` and `pnpm build` all green | **done** |
 | M1 | Engine: rules, position notation, move notation, events, `isSealed` | §11.1–§11.4 green, perft matches | **done** |
 | M2 | AI and the `tools/sim` harness | Balance runs land near §6 for all three variants | **built** |
-| M3 | Board UI and pass-and-play, Original only | Two people can finish a game on one phone | next |
+| M3 | Board UI and pass-and-play, Original only | Two people can finish a game on one phone | **M3a done, M3b next** |
 | C1 | Clocks, offers and time gifts (`docs/ADDENDUM-CLOCKS.md`) | Clock, offers and gift policy green; engine still timer-free | **done** |
 | C2 | Premove, abort, low-time warning, Zen | Logic green; rendering waits on M3 | **done** |
 | M4 | Play against the computer: worker, three levels, undo | Hard stays inside its time budget on a phone | |
@@ -136,8 +136,48 @@ announces from engine **events** rather than by diffing boards (§7.7). The
 engine already emits `move`, `capture`, `type-extinct`, `sealed` and
 `game-over`, which is exactly what §10.5's aids and §10.6's announcements need.
 
-`apps/web` is still a placeholder. It reads the variant list and opening moves
-from the engine, which proves the wiring; everything else is M3.
+`apps/web` is still mostly a placeholder — selecting a variant swaps which
+position renders, nothing is clickable yet. What it now proves is `@sps/board`
+reaching the browser, not just the engine.
+
+## What M3a left behind
+
+`packages/board` renders a position: tokens, coordinates, corner tints, the
+last-move tint and the flame placeholder, per `docs/VISUAL_SYSTEM.md` 8. One
+theme (Field Notes), one family (Cut stone) — the other two themes are filled
+in as data (`themes.ts`) since the swatches were already corrected and
+validated, but `familyMark` throws a clear, specific error for every family
+but Cut stone rather than shipping unbuilt geometry. All three of `9`'s gates
+are in `test/`: swatch contrast and dot alpha are asserted directly; the
+greyscale-at-size question is not — it never can be, it's a person's call, not
+a boolean — so `greyscale-review.test.ts` generates the sheet
+(`test/fixtures/greyscale-review.svg`) for Vig to look at instead of faking a
+pass. `render.test.ts` runs the renderer against the engine's own fixtures
+(`vectors.json`, `tutorial.json`) rather than a hand-picked sample, so it's
+checked against the same positions the rules already are.
+
+Two things worth knowing before extending it:
+
+* **The reviewed-three-times scissors geometry needed re-deriving once, not
+  just transcribing.** The README's CSS reads as "the bow, centred on the
+  bar's bottom edge" — take that literally (bow centre = bar's bottom-centre
+  point) and the two loops land almost concentric, close to the exact
+  failure mode §3 rejects ("detached blades + free-floating rings ... reads
+  as 'V oo'"). The full `translate(-50%, 42%)` — worked through in the
+  comment above `blade()` in `families.ts` — moves the loops' centre 92% of
+  their own diameter past that edge, not onto it, which is what actually
+  gives two distinguishable finger holes. Caught by rendering it and looking,
+  not by re-reading the CSS harder; there was no test that would have caught
+  it, because there is no automated test for "does this look like scissors."
+* **Ownership mode is decided by the renderer, not passed in.** `renderMode`
+  is called with the actual square size every time; nothing upstream chooses
+  standalone or knockout. A future settings screen has nothing to get wrong
+  here — there is no setting.
+
+`knockoutPiece`'s figure-ground inversion (filled disc / hollow mark for
+"yours", hollow disc / filled mark for the opponent) reads clearly even at a
+390px phone's actual square size in `apps/web` — confirmed by rendering it and
+looking, not assumed from the fraction arithmetic alone.
 
 ## What M1 left behind
 
