@@ -26,3 +26,10 @@ export class NotationError extends Error {
     this.name = 'NotationError';
   }
 }
+
+export class ShareError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ShareError';
+  }
+}

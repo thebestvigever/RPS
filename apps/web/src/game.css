@@ -31,14 +31,41 @@
 .board-wrap:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .board-wrap svg { display: block; width: 100%; height: 100%; }
 
+/* Corner-anchored panels — the Bar layout (docs/VISUAL_SYSTEM.md 8): each
+   player's name sits beside their OWN corner rather than in a neutral row.
+   Two rules make that work at 360px without a second layout:
+
+   1. The panel is exactly as wide as the board (`--board-px`, set inline from
+      the same number the renderer is given), so its outer edge lines up with
+      the board's edge and the name really is over the corner square rather
+      than over the page margin.
+   2. It anchors by WHOSE panel it is, never by colour. Spec 10.2 turns the
+      board around for a Red-playing human, so the viewer's own corner is
+      always bottom-left on screen — "yours, bottom-left" holds either way,
+      where "Blue, bottom-left" would be wrong half the time. */
 .panel {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  width: 100%;
+  gap: 0.75rem;
+  width: var(--board-px, 100%);
+  max-width: 100%;
   font-size: 0.9rem;
 }
-.panel-name { font-weight: 600; }
+/* The opponent's corner is the far one — top-right on screen — so their row
+   reads toward it: name outermost, clock innermost. */
+.panel--opponent { flex-direction: row-reverse; }
+
+.panel-name { display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 600; }
+.panel-dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+.panel--blue .panel-dot { color: var(--blue); }
+.panel--red .panel-dot { color: var(--red); }
+
 .panel-counts { display: flex; gap: 0.6rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .count--last { color: var(--alert, #b0781c); }
 .count--out { color: var(--muted); text-decoration: line-through; }
@@ -68,12 +95,60 @@
 .bar button.resign { color: var(--red); border-color: var(--red); }
 
 .game-over {
+  width: var(--board-px, 100%);
+  max-width: 100%;
   margin-top: 0.5rem;
   padding: 0.75rem 1rem;
   border: 1px solid var(--grid);
   border-radius: 8px;
   text-align: center;
+}
+.game-over-result { margin: 0 0 0.6rem; font-weight: 600; }
+
+/* Spec 10.7's "moves played, captures each side". A row of labelled numbers
+   reads at a glance where a sentence would have to be parsed. */
+.game-over-facts {
+  display: flex;
+  justify-content: center;
+  gap: 1.1rem;
+  margin: 0 0 0.6rem;
+  font-size: 0.85rem;
+}
+.game-over-facts div { display: flex; flex-direction: column; gap: 0.1rem; }
+.game-over-facts dt { color: var(--muted); }
+.game-over-facts dd {
+  margin: 0;
   font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.game-over-extinct { margin: 0 0 0.6rem; font-size: 0.85rem; color: var(--muted); }
+.game-over-note { margin: 0.5rem 0 0; font-size: 0.8rem; color: var(--muted); }
+
+.game-over-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+}
+.game-over-buttons button {
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--grid);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+/* `.play`'s own rule in styles.css is a single class, so the `button` type
+   selector above out-specifies it and would leave Rematch looking like plain
+   text. Restated here rather than relying on either file's import order. */
+.game-over-buttons .play {
+  width: auto;
+  margin: 0;
+  border: 1px solid var(--blue);
+  background: var(--blue);
+  color: white;
 }
 
 /* Illegal-target shake — spec 10.4: "a gentle shake". Respects the global
@@ -141,4 +216,74 @@
   cursor: pointer;
 }
 
-.game-over .play { margin-top: 0.5rem; width: auto; padding: 0.5rem 1.25rem; }
+
+/* Move list — spec 10.8, in a drawer on a phone (spec 10.11). `<details>`
+   rather than a hand-rolled disclosure: keyboard accessible and self-
+   announcing, with no state for this app to get wrong. */
+.movelist {
+  width: var(--board-px, 100%);
+  max-width: 100%;
+  border: 1px solid var(--grid);
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+.movelist > summary {
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  font-weight: 600;
+  list-style-position: inside;
+}
+.movelist > summary:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+.movelist-count { color: var(--muted); font-weight: 400; }
+.movelist-empty { margin: 0; padding: 0 0.75rem 0.6rem; color: var(--muted); }
+
+.movelist-rows {
+  margin: 0;
+  padding: 0 0.5rem 0.5rem;
+  list-style: none;
+  max-height: 11rem;
+  overflow-y: auto;
+}
+.movelist-rows li {
+  display: grid;
+  grid-template-columns: 2.2rem 1fr 1fr;
+  align-items: center;
+  gap: 0.25rem;
+}
+.movelist-number {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: right;
+  padding-right: 0.3rem;
+}
+.movelist-move {
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: left;
+  padding: 0.15rem 0.35rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.movelist-move:hover { background: var(--square-alt); }
+.movelist-move--on { background: var(--blue); color: white; }
+
+/* Review stepper — spec 10.8's arrows and jump-to-ends, as buttons so the
+   feature exists on a touchscreen too, not only under a keyboard. */
+.bar--review { align-items: center; }
+.review-count {
+  min-width: 4.5rem;
+  text-align: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.bar--review .review-leave {
+  width: auto;
+  padding: 0 0.75rem;
+  font-size: 0.85rem;
+}
+
+.game-over-reason { margin: 0 0 0.6rem; font-size: 0.9rem; color: var(--muted); }

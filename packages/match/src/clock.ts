@@ -86,8 +86,12 @@ export function createClock(control: TimeControl): ClockState {
 /**
  * Whose turn the clock is on, running or not. A paused clock still belongs to
  * somebody, and the time they have already spent this turn is still theirs.
+ *
+ * Exported because a game record has to say which side each `remainingMs`
+ * entry belongs to (spec 8.3), and reading it off the clock is exact where
+ * counting plies even/odd is an assumption about who moves first.
  */
-function turnSideOf(clock: ClockState): Side | null {
+export function turnSide(clock: ClockState): Side | null {
   return clock.running ?? clock.pausedSide;
 }
 
@@ -101,7 +105,7 @@ function turnElapsed(clock: ClockState, now: number): number {
 export function remainingAt(clock: ClockState, side: Side, now: number): number {
   if (clock.control.unlimited) return Infinity;
   const banked = clock.remainingMs[side];
-  if (turnSideOf(clock) !== side) return Math.max(0, banked);
+  if (turnSide(clock) !== side) return Math.max(0, banked);
   const stage = stageFor(clock.control, clock.stageIndex[side]);
   return Math.max(0, banked - costOf(stage, turnElapsed(clock, now)));
 }
@@ -133,7 +137,7 @@ export function startTurn(clock: ClockState, side: Side, now: number): ClockStat
 
 /** Banks what the current turn has cost so far, without ending the turn. */
 function commit(clock: ClockState, now: number): ClockState {
-  const side = turnSideOf(clock);
+  const side = turnSide(clock);
   if (side === null) return clock;
   const stage = stageFor(clock.control, clock.stageIndex[side]);
   const elapsed = turnElapsed(clock, now);
@@ -206,7 +210,7 @@ export function press(clock: ClockState, now: number): ClockState {
 
 /** Stops the clock without paying a bonus — game over, or the app going away. */
 export function stop(clock: ClockState, now: number): ClockState {
-  if (turnSideOf(clock) === null) return clock;
+  if (turnSide(clock) === null) return clock;
   return {
     ...commit(clock, now),
     running: null,

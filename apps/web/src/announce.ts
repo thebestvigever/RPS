@@ -5,7 +5,7 @@
 
 import { pieceTypeName } from '@sps/board';
 import { squareName } from '@sps/engine';
-import type { GameEvent, GameResult, Move, Side } from '@sps/engine';
+import type { Extinction, GameEvent, GameResult, Move, Side } from '@sps/engine';
 
 function sideName(side: Side): string {
   return side === 'blue' ? 'Blue' : 'Red';
@@ -77,4 +77,18 @@ export function describeTurn(events: readonly GameEvent[]): string {
 
 export function whoseTurn(side: Side): string {
   return `${sideName(side)}'s move.`;
+}
+
+/**
+ * Spec 10.7's overlay copy: "which types were wiped out and when".
+ * "Red's Paper, move 7" — numbered by full moves, the way the move list does
+ * (spec 10.8), so the two can be read against each other.
+ */
+export function describeExtinction(extinction: Extinction): string {
+  return `${sideName(extinction.side)}'s ${pieceTypeName(extinction.pieceType)}, move ${fullMoveOf(extinction.ply)}`;
+}
+
+/** Ply 1 and 2 are both move 1 — the move list's own numbering (spec 10.8). */
+export function fullMoveOf(ply: number): number {
+  return Math.ceil(ply / 2);
 }

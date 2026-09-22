@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { VARIANTS, parseSquare } from '@sps/engine';
 import type { Side } from '@sps/engine';
 import { renderBoard } from '../src/render.js';
+import { displayCell } from '../src/orientation.js';
 import { SWATCHES, THEME_IDS } from '../src/themes.js';
 
 import vectors from '../../engine/test/fixtures/vectors.json' with { type: 'json' };
@@ -228,5 +229,86 @@ describe('keyboard focus ring (M3b, spec 10.10)', () => {
       appearance: { sideColors, viewerSide: 'blue' as const },
     };
     expect(renderBoard({ ...base, focusSquare: 0 })).toContain('stroke-dasharray');
+  });
+});
+
+describe('orientation (spec 10.2)', () => {
+  const BOARD_PX = 540;
+  const SQUARE_PX = BOARD_PX / 9;
+
+  function rendered(orientation: Side) {
+    return renderBoard({
+      fen: VARIANTS.original.start,
+      variant: VARIANTS.original,
+      boardPx: BOARD_PX,
+      theme: 'field-notes',
+      family: 'cut-stone',
+      appearance: { sideColors, viewerSide: orientation },
+      orientation,
+    });
+  }
+
+  /** Where the piece group for `square` was translated to. */
+  function pieceAt(markup: string, square: number): { x: number; y: number } {
+    const match = markup.match(
+      new RegExp(`<g transform="translate\\(([-\\d.]+),([-\\d.]+)\\)" data-square="${square}"`),
+    );
+    if (!match) throw new Error(`no piece rendered on square ${square}`);
+    return { x: Number(match[1]), y: Number(match[2]) };
+  }
+
+  it('defaults to Blue, matching every earlier milestone', () => {
+    expect(rendered('blue')).toBe(
+      renderBoard({
+        fen: VARIANTS.original.start,
+        variant: VARIANTS.original,
+        boardPx: BOARD_PX,
+        theme: 'field-notes',
+        family: 'cut-stone',
+        appearance: { sideColors, viewerSide: 'blue' },
+      }),
+    );
+  });
+
+  it('moves a piece to the opposite corner of the board when Red is looking', () => {
+    // b4 is Blue's Rock in the opening position (spec 8.2's start FEN), two
+    // rows up from the bottom-left. Under a 180 turn it has to land the same
+    // distance in from the OPPOSITE corner — both coordinates reflected, which
+    // a rank-only mirror would get wrong in x.
+    const b4 = parseSquare('b4');
+    const blue = pieceAt(rendered('blue'), b4);
+    const red = pieceAt(rendered('red'), b4);
+    expect(blue).toEqual({ x: SQUARE_PX, y: SQUARE_PX * 5 });
+    expect(red).toEqual({ x: SQUARE_PX * 7, y: SQUARE_PX * 3 });
+  });
+
+  it("puts the viewer's own corner tint bottom-left either way", () => {
+    // The tint is the first `fill-opacity` rect of each colour; rather than
+    // parse it, check the whole board: whoever is looking, the bottom-left
+    // square carries THEIR colour, which is what "your own corner sits
+    // bottom-left" actually promises a player.
+    const bottomLeft = { x: 0, y: SQUARE_PX * 8 };
+    for (const side of ['blue', 'red'] as const) {
+      const markup = rendered(side);
+      const home = side === 'blue' ? parseSquare('a1') : parseSquare('i9');
+      const { row, col } = displayCell(home, side);
+      expect({ x: col * SQUARE_PX, y: row * SQUARE_PX }).toEqual(bottomLeft);
+      expect(markup).toContain(sideColors[side]);
+    }
+  });
+
+  it('turns the coordinates with the board', () => {
+    // The bug this exists for: pieces rotate, labels do not, and the board
+    // reads as if `a1` were still bottom-left. Blue sees a..i left to right;
+    // Red, looking from the other end, sees i..a.
+    const files = (markup: string) =>
+      [...markup.matchAll(/<text [^>]*>([a-i])<\/text>/g)].map((match) => match[1]).join('');
+    expect(files(rendered('blue'))).toBe('abcdefghi');
+    expect(files(rendered('red'))).toBe('ihgfedcba');
+
+    const ranks = (markup: string) =>
+      [...markup.matchAll(/<text [^>]*>([1-9])<\/text>/g)].map((match) => match[1]).join('');
+    expect(ranks(rendered('blue'))).toBe('987654321');
+    expect(ranks(rendered('red'))).toBe('123456789');
   });
 });
