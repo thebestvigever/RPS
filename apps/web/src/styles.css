@@ -1,8 +1,24 @@
-/* Starting colour tokens from spec 10.3 — adapt freely. Pieces must stay at 3:1
-   contrast or better against squares, and owner is never colour alone. */
+/* Starting colour tokens from spec 10.3 — which says "adapt freely", and these
+   are adapted. Two of the spec's own values do not clear WCAG AA (10.10) at the
+   sizes this interface uses them, measured with the repo's own `contrastRatio`:
+
+     white on --red   #d2493c  4.41:1   (a filled button or chip)
+     --alert #b0781c on white  3.78:1   (the "last one" count, the low clock)
+
+   Contrast is symmetric, so darkening each of those by a couple of percent
+   fixes it as a FILL and as TEXT at once, which is why there is no separate
+   fill token: --red and --alert simply became the versions that pass.
+
+     --red   #d2493c -> #ce483b   (2% darker)  4.55:1
+     --alert  b0781c -> #9e6c19  (10% darker)  4.55:1
+
+   The board's own piece colours are NOT these. They come from @sps/board's
+   validated swatches (docs/VISUAL_SYSTEM.md 3), so nothing here moves a piece
+   off its 3:1 floor against the squares. */
 :root {
   --blue: #3d6fd6;
-  --red: #d2493c;
+  --red: #ce483b;
+  --alert: #9e6c19;
   --neutral: #7a7f87;
   --square: #f4f3ef;
   --square-alt: #e8e6df;
@@ -10,12 +26,18 @@
   --ink: #1b1b1b;
   --paper: #ffffff;
   --muted: #5d6068;
+  /* What sits ON a filled accent. The light theme's accents are dark enough
+     to carry white; the dark theme's are light, so there it is near-black.
+     One token rather than one per accent, because a single foreground clears
+     AA on all three in each theme — see the audit in the commit. */
+  --on-fill: #ffffff;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --blue: #7fa3ea;
     --red: #e8776a;
+    --alert: #b0781c;
     --neutral: #9aa0a8;
     --square: #2a2d33;
     --square-alt: #23262b;
@@ -23,6 +45,7 @@
     --ink: #f2f2f0;
     --paper: #16181c;
     --muted: #a3a8b2;
+    --on-fill: #16181c;
   }
 }
 
@@ -71,12 +94,17 @@ h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
   border: none;
   border-radius: 8px;
   background: var(--blue);
-  color: white;
+  color: var(--on-fill);
   font: inherit;
   font-weight: 600;
   cursor: pointer;
 }
-.play:hover { filter: brightness(1.05); }
+/* Hover lifts the button rather than brightening the fill. `brightness()` on
+   a filled accent moves it toward its own foreground and quietly eats the
+   contrast this file just bought — in the light theme white on the hovered
+   blue drops below AA. A shadow changes nothing about the colour pair. */
+.play:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 35%, transparent); }
+.play:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 
 .time-control {
   display: flex;
