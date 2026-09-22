@@ -272,6 +272,65 @@ folded in here.
 on the human's own turn — verified by playing one exchange and undoing it
 back to the empty history. It did not refund clock time; **M4b below does.**
 
+## Fixed after M4b — three bugs Vig hit by playing it
+
+All three were found the way M3a's scissors and M3b's tap race were: by using
+the thing, not by reading it. None was caught by 450 passing tests. Two had
+been shipped broken since M3b, and the first since M4 — and two of the three
+were on **every single move** of every game.
+
+**Pass-and-play could not get past Blue's first move.** M3b's gate — "two
+people finish a game on one phone" — had genuinely been met, with selection
+ungated: `isSelectable = legal.some(...)`. M4 then added `humanTurn &&` so you
+could not move the computer's pieces, and `humanSide` is Blue by construction
+when there is no computer. So the moment Blue moved, `humanTurn` went false
+and **no Red piece was selectable**. The clock still handed the turn to Red,
+which is what made it read as a board that had stopped responding rather than
+one disagreeing with itself about who was playing.
+
+Nothing type-checked it and nothing could: `turn` and `humanSide` are both
+valid `Side`s, and the comparison is perfectly well-typed nonsense. So the
+rule moved out of the component and into `packages/match/src/control.ts`
+(`controlsSide`), beside the offer, gift and premove policies it belongs with,
+where `control.test.ts` pins it — including the exact regression, that Red
+stays movable in pass-and-play after Blue has moved.
+
+The lesson worth keeping: **a mode question was being answered by comparing
+two sides.** M4 only ever tested the mode it was building.
+
+**Every moving piece flashed through the top-left square.** A CSS `transform`
+*property* replaces an SVG `transform` *attribute* rather than composing with
+it. Each piece group carries its `translate` to its square as an attribute, and
+the slide/capture animation set the property on that same group — so for the
+length of every animation the piece rendered from the SVG origin, then snapped
+back when the animation was removed. Measured: a piece resting at (492, 414)
+sat at (188, 109) mid-animation, against a board origin of (185, 114). The
+illegal-target shake had it too, since that is also a transform on the outer
+group.
+
+`piecesLayer` now nests a second, untransformed group (`PIECE_MOTION_CLASS`)
+inside each positioned one, and apps/web animates that. Nothing to clobber, so
+the transforms compose. It also fixes a capture's `scale()`, which had been
+pivoting about the board's corner rather than the piece — `transform-box:
+fill-box` puts the pivot on the mark. Shipped broken since M3b, on every move.
+
+While it was open: each keyframe now carries its own easing (WAAPI applies a
+keyframe's curve to the interval starting at it, so one curve stretched over
+four keyframes was spending its deceleration on the travel and leaving the
+overshoot linear), and the captor animation gained `fill: 'both'` so no frame
+of the final position paints before the first keyframe.
+
+`render.test.ts` pins the nesting, because apps/web cannot express "do not
+clobber my transform" by itself — the markup has to hand it something safe.
+
+**Every game opened with a dashed circle in the top-left corner.** The
+keyboard cursor (spec 10.4) initialises to square 0 — `a9` — and the renderer
+drew it unconditionally, so a ring sat in an empty corner of every fresh board
+looking like a rendering artefact, which is exactly what a player reported it
+as. It is now shown only once the keyboard is actually driving: `:focus-visible`
+on the board (a tab, not a click) or the first arrow key, whichever comes
+first. Pre-existing since M3b.
+
 ## What M4b left behind
 
 Four things M3b and M4 had each cut for the same reason, and one of them was

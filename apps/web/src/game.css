@@ -158,7 +158,12 @@
   25% { transform: translateX(-3px); }
   75% { transform: translateX(3px); }
 }
-.board-wrap [data-square].shake {
+/* The shake goes on the INNER group for the same reason the capture motion
+   does: a CSS transform on the outer group replaces the SVG `transform`
+   attribute that positions the piece, so shaking it threw the piece to the
+   board's top-left corner and back. The class stays on the outer element —
+   that is what Game.tsx toggles — and only the animation moves inward. */
+.board-wrap [data-square].shake > .piece-motion {
   animation: shake 130ms ease-in-out 2;
 }
 

@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import { VARIANTS, parseSquare } from '@sps/engine';
 import type { Side } from '@sps/engine';
-import { renderBoard } from '../src/render.js';
+import { PIECE_MOTION_CLASS, renderBoard } from '../src/render.js';
 import { displayCell } from '../src/orientation.js';
 import { SWATCHES, THEME_IDS } from '../src/themes.js';
 
@@ -310,5 +310,40 @@ describe('orientation (spec 10.2)', () => {
       [...markup.matchAll(/<text [^>]*>([1-9])<\/text>/g)].map((match) => match[1]).join('');
     expect(ranks(rendered('blue'))).toBe('987654321');
     expect(ranks(rendered('red'))).toBe('123456789');
+  });
+});
+
+describe('the animatable inner group', () => {
+  // Regression. A CSS `transform` PROPERTY replaces an SVG `transform`
+  // ATTRIBUTE rather than composing with it, so animating the positioned
+  // group threw every moving piece to the SVG origin — the top-left square —
+  // for the length of its animation, then snapped it back. It shipped from
+  // M3b and affected every move and every illegal-target shake.
+  //
+  // apps/web cannot express "don't clobber my transform" on its own; the
+  // markup has to give it something safe to animate. So this pins the shape
+  // the fix depends on: a positioned outer group, and an inner one with no
+  // transform of its own.
+  const svg = render(VARIANTS.original.start, 'original');
+
+  it('nests one untransformed group inside every positioned piece group', () => {
+    const groups = [
+      ...svg.matchAll(/<g transform="translate\([-\d.]+,[-\d.]+\)" data-square="\d+"><g ([^>]*)>/g),
+    ];
+    expect(groups).toHaveLength(20); // ten a side
+
+    for (const [, attrs] of groups) {
+      expect(attrs).toContain(`class="${PIECE_MOTION_CLASS}"`);
+      // The whole point: nothing here may set a transform, or animating it
+      // would wipe out the positioning again.
+      expect(attrs).not.toContain('transform=');
+    }
+  });
+
+  it('pivots the inner group on the mark itself, not the square corner', () => {
+    // Without this a capture's scale() turns about the top-left of the
+    // square rather than the piece, which reads as a lunge rather than a
+    // squash.
+    expect(svg).toContain('transform-box: fill-box; transform-origin: center');
   });
 });

@@ -39,6 +39,7 @@ import {
 import type { GameRecord, GameResult, GameState, Move, PieceType, Side, Square, VariantConfig } from '@sps/engine';
 import {
   MOTION_MS,
+  PIECE_MOTION_CLASS,
   THEMES,
   captureMotion,
   illegalCaptureReason,
@@ -55,6 +56,7 @@ import {
   canGive,
   canOffer,
   clockRecord,
+  controlsSide,
   createClock,
   createOffers,
   flaggedAt,
@@ -161,35 +163,54 @@ interface PendingAnim {
   motion: MotionKind | null;
 }
 
-/** Captor keyframes: the 150ms slide every move gets, with the matchup's own
- * shape (README 3b) layered on for a capture. Eased as one curve rather than
- * per-segment — a reasonable simplification of a CSS animation, not a rules
- * question, and noted here rather than left silent. */
+/**
+ * Captor keyframes: the 150ms slide every move gets (spec 10.4), with the
+ * matchup's own shape layered on for a capture (docs/VISUAL_SYSTEM.md 6).
+ *
+ * Every segment carries its own `easing`. WAAPI applies a keyframe's easing to
+ * the interval that STARTS at it, so a four-keyframe capture gets four curves
+ * rather than one stretched across the whole thing — which is what flattened
+ * the overshoot the design asks for: a single `ease-out` spends its
+ * deceleration on the travel and leaves the bounce linear.
+ *
+ * These animate the inner, untransformed group, so `translate(0, 0)` really is
+ * "where this piece belongs" and the scales pivot about the mark itself.
+ */
+const TRAVEL = 'cubic-bezier(.22,.61,.36,1)'; // decelerate into the square
+const SETTLE = 'cubic-bezier(.33,0,.67,1)'; // symmetric, for a bounce coming to rest
+
 function captorKeyframes(motion: MotionKind | null, dx: number, dy: number): Keyframe[] {
   const arrive = `translate(${dx}px, ${dy}px)`;
-  if (!motion) return [{ transform: arrive }, { transform: 'translate(0, 0)' }];
-  if (motion === 'crush') {
+  if (!motion) {
     return [
-      { transform: `${arrive} scale(1)`, offset: 0 },
-      { transform: 'translate(0, 0) scale(1.16)', offset: 0.55 },
-      { transform: 'translate(0, 0) scale(0.94)', offset: 0.8 },
-      { transform: 'translate(0, 0) scale(1)', offset: 1 },
+      { transform: arrive, easing: TRAVEL },
+      { transform: 'translate(0px, 0px)' },
+    ];
+  }
+  if (motion === 'crush') {
+    // Drops in and overshoots — the weight of a rock landing.
+    return [
+      { transform: `${arrive} scale(1)`, offset: 0, easing: 'cubic-bezier(.4,0,.6,1)' },
+      { transform: 'translate(0px, 0px) scale(1.16)', offset: 0.55, easing: SETTLE },
+      { transform: 'translate(0px, 0px) scale(0.94)', offset: 0.8, easing: SETTLE },
+      { transform: 'translate(0px, 0px) scale(1)', offset: 1 },
     ];
   }
   if (motion === 'cut') {
+    // Closes past centre and back — the snip.
     return [
-      { transform: `${arrive} rotate(0deg)`, offset: 0 },
-      { transform: 'translate(0, 0) rotate(-8deg)', offset: 0.4 },
-      { transform: 'translate(0, 0) rotate(6deg)', offset: 0.75 },
-      { transform: 'translate(0, 0) rotate(0deg)', offset: 1 },
+      { transform: `${arrive} rotate(0deg)`, offset: 0, easing: TRAVEL },
+      { transform: 'translate(0px, 0px) rotate(-8deg)', offset: 0.4, easing: SETTLE },
+      { transform: 'translate(0px, 0px) rotate(6deg)', offset: 0.75, easing: SETTLE },
+      { transform: 'translate(0px, 0px) rotate(0deg)', offset: 1 },
     ];
   }
-  // wrap
+  // wrap: swells over the victim, holds, then settles
   return [
-    { transform: `${arrive} scale(1)`, offset: 0 },
-    { transform: 'translate(0, 0) scale(1.45)', offset: 0.5 },
-    { transform: 'translate(0, 0) scale(1.45)', offset: 0.7 },
-    { transform: 'translate(0, 0) scale(1)', offset: 1 },
+    { transform: `${arrive} scale(1)`, offset: 0, easing: TRAVEL },
+    { transform: 'translate(0px, 0px) scale(1.45)', offset: 0.5, easing: 'linear' },
+    { transform: 'translate(0px, 0px) scale(1.45)', offset: 0.7, easing: SETTLE },
+    { transform: 'translate(0px, 0px) scale(1)', offset: 1 },
   ];
 }
 
@@ -300,10 +321,32 @@ export default function Game({
   const [viewPly, setViewPly] = useState<number | null>(reviewOnly ? 0 : null);
   const reviewing = viewPly !== null;
 
+  /**
+   * Whether the keyboard cursor is being shown at all.
+   *
+   * `focus` starts at square 0 — a9, the top-left corner — and the ring used
+   * to be drawn unconditionally, so every game opened with a dashed circle
+   * parked in an empty corner that nothing had put there and nothing was
+   * using. It reads as a rendering artefact, which is exactly what it was.
+   *
+   * `:focus-visible` is the right test rather than plain focus: tabbing to
+   * the board is someone about to use the arrow keys, clicking it is not.
+   */
+  const [keyboardCursor, setKeyboardCursor] = useState(false);
+
   const legal = useMemo(() => legalMoves(gameState), [gameState]);
   const counts = useMemo(() => typeCounts(gameState), [gameState]);
   const gameOver = gameState.result != null;
-  const humanTurn = gameState.turn === humanSide;
+  /**
+   * Whether the person at this device may move the side to move.
+   *
+   * NOT `turn === humanSide`: pass-and-play is one person playing both sides,
+   * and `humanSide` is Blue there by construction — so that comparison went
+   * false the moment Blue moved and left no Red piece selectable, with the
+   * clock still ticking over for Red. The mode decides this, so the mode
+   * package owns it (`controlsSide`) and a test pins it.
+   */
+  const humanTurn = controlsSide(mode, gameState.turn, humanSide);
 
   /**
    * What the BOARD shows, which is the live game until somebody steps back
@@ -357,10 +400,24 @@ export default function Game({
         lastMove: shownLastMove,
         selection,
         // No cursor over a position that cannot be played — its dashed ring
-        // would promise an input that does nothing.
-        focusSquare: reviewing ? null : focus,
+        // would promise an input that does nothing — and none until the
+        // keyboard is actually driving.
+        focusSquare: reviewing || !keyboardCursor ? null : focus,
       }),
-    [fen, variant, boardPx, theme, family, view, orientation, shownLastMove, selection, focus, reviewing],
+    [
+      fen,
+      variant,
+      boardPx,
+      theme,
+      family,
+      view,
+      orientation,
+      shownLastMove,
+      selection,
+      focus,
+      reviewing,
+      keyboardCursor,
+    ],
   );
 
   const doMove = useCallback(
@@ -538,6 +595,9 @@ export default function Game({
       const delta = arrows[event.key];
       if (delta) {
         event.preventDefault();
+        // Pressing an arrow IS the keyboard taking over, whatever
+        // `:focus-visible` decided when the board was focused.
+        setKeyboardCursor(true);
         // Screen directions, not board ones — the cursor follows the arrow a
         // player actually pressed, whichever way round the board is.
         setFocus((f) => clampSquare(f, delta[0], delta[1], orientation));
@@ -828,12 +888,20 @@ export default function Game({
       return;
     }
 
-    const captorEl = container.querySelector(`[data-square="${anim.move.to}"]`);
+    // The INNER group, never the positioned outer one — see `piecesLayer`.
+    const captorEl = container.querySelector(`[data-square="${anim.move.to}"] .${PIECE_MOTION_CLASS}`);
     const { dx, dy } = slideOffsetPx(anim.move.from, anim.move.to, squarePx, orientation);
     const duration = anim.motion ? MOTION_MS.capture : MOTION_MS.slide;
     captorEl?.animate(captorKeyframes(anim.motion, dx, dy), {
       duration,
-      easing: anim.motion === 'crush' ? 'cubic-bezier(.3,1.6,.4,1)' : 'ease-out',
+      // `both` matters: without it the browser paints one frame of the final
+      // position before the first keyframe lands, which reads as a flicker at
+      // the destination just before the piece slides into it.
+      fill: 'both',
+      // Easing is per-keyframe (see `captorKeyframes`) so each segment of a
+      // capture can have its own curve; a single curve stretched over four
+      // keyframes is what made the overshoot land flat.
+      easing: 'linear',
     });
 
     let overlay: HTMLDivElement | null = null;
@@ -871,7 +939,11 @@ export default function Game({
         isOpponent: captured.owner !== view.viewerSide,
       });
       container.appendChild(overlay);
-      const victimAnim = overlay.animate(victimKeyframes(anim.motion), { duration, fill: 'forwards' });
+      const victimAnim = overlay.animate(victimKeyframes(anim.motion), {
+        duration,
+        fill: 'forwards',
+        easing: TRAVEL,
+      });
       victimAnim.onfinish = () => overlay?.remove();
     }
 
@@ -933,6 +1005,17 @@ export default function Game({
         onPointerDown={onPointerDown}
         onPointerUp={onPointerUp}
         onKeyDown={onKeyDown}
+        onFocus={(event) => {
+          // `:focus-visible` is what tells a tab from a click. Wrapped
+          // because a browser without it throws on the selector rather than
+          // returning false, and a thrown match here would break the board.
+          try {
+            setKeyboardCursor(event.currentTarget.matches(':focus-visible'));
+          } catch {
+            setKeyboardCursor(false);
+          }
+        }}
+        onBlur={() => setKeyboardCursor(false)}
         // eslint-disable-next-line react/no-danger
         dangerouslySetInnerHTML={{ __html: svg }}
       />
