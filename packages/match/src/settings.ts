@@ -1,8 +1,9 @@
 // Display settings — spec 10.5 and 10.11, plus Zen.
 //
 // Every aid is on by default, as the spec asks, and each is switchable. Zen
-// hides the lot without forgetting what the player chose: turning it off should
-// give them back the board they had, not the defaults.
+// quiets the board without forgetting what the player chose: turning it off
+// should give them back the board they had, not the defaults. What it leaves
+// standing is `ZEN_AIDS` below.
 
 export interface Aids {
   /** Rock, Paper and Scissors counts in each panel. */
@@ -23,7 +24,10 @@ export interface Aids {
 
 export interface DisplaySettings {
   aids: Aids;
-  /** Board and clocks only: hides the panels, move list and every aid. */
+  /**
+   * The quiet board: clocks and type counts stay, names and the move list go,
+   * and every aid but the counts is hidden (`ZEN_AIDS`).
+   */
   zen: boolean;
   coordinates: boolean;
   sound: boolean;
@@ -50,8 +54,20 @@ export const DEFAULT_SETTINGS: DisplaySettings = {
   confirmMoves: false,
 };
 
-const NO_AIDS: Aids = {
-  typeCounts: false,
+/**
+ * What Zen leaves on.
+ *
+ * Type counts survive, and every other aid does not — Vig's call, and it
+ * changes what the addendum first specified ("hides every aid"). The reason
+ * is that Zen is meant to be a *quiet* board rather than a *bare* one: the
+ * counts are the one aid that is not advice. Threat lines, the race meter,
+ * shields, the Keep lock, danger marks and the hint all tell you what to
+ * think about the position; the counts only say what is on it, which you can
+ * get by looking at the board and counting. Hiding them makes the player do
+ * clerical work, not deeper thinking, so Zen keeps them next to the clock.
+ */
+const ZEN_AIDS: Aids = {
+  typeCounts: true,
   threatLines: false,
   raceMeter: false,
   permanentPieces: false,
@@ -64,7 +80,11 @@ const NO_AIDS: Aids = {
  * What the board should actually show. Zen overrides the aids for as long as it
  * is on; it does not overwrite them, so switching it off restores the player's
  * own choices rather than the defaults.
+ *
+ * Zen never turns an aid ON that the player had chosen to hide — it is a
+ * quieting pass over their own settings, so an off count stays off.
  */
 export function visibleAids(settings: DisplaySettings): Aids {
-  return settings.zen ? NO_AIDS : settings.aids;
+  if (!settings.zen) return settings.aids;
+  return { ...ZEN_AIDS, typeCounts: ZEN_AIDS.typeCounts && settings.aids.typeCounts };
 }

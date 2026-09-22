@@ -173,7 +173,7 @@ check it would offer a draw in a position it was one move from winning.
 | **Premove** | One queued at a time; a new one replaces it; an illegal one is dropped silently. Off in pass-and-play, where there is no waiting turn. | `premove.ts` |
 | **Abort** | Allowed in the first two plies, then "resign instead". Always allowed in pass-and-play. | `offers.ts` |
 | **Low-time warning** | Amber then red at the *smaller* of a fixed time and a share of the starting clock — a flat 30s threshold would be on from move one in a 1+0 game. | `clock.ts` |
-| **Zen** | Hides every aid, and **overrides rather than overwrites** them: switching it off restores the player's own choices, not the defaults. | `settings.ts` |
+| **Zen** | The quiet board: clocks and **type counts** stay, names and the move list go, every other aid is hidden. **Overrides rather than overwrites**, so switching it off restores the player's own choices, not the defaults — and it never turns back on an aid they had switched off. Keeping the counts is Vig's call, revising this table's original "hides every aid": they report the position rather than advise on it, and hiding them buys clerical work, not depth. | `settings.ts` |
 
 Premoves are unusually simple in this game: every move is one king step, so a
 premove is either legal when the turn arrives or it is not. Nothing to

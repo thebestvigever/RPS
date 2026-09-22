@@ -81,6 +81,13 @@ export default function App() {
   const [sideChoice, setSideChoice] = useState<SideChoice>('blue');
   const [blueName, setBlueName] = useState('');
   const [redName, setRedName] = useState('');
+  /**
+   * Zen (C2) lives here, not in Game, because a rematch remounts Game — and a
+   * player who asked for a quiet board should not have to ask again every
+   * game. It is session-only for now; persisting it is M8's `localStorage`
+   * work (spec 10.13), along with the rest of `DisplaySettings`.
+   */
+  const [zen, setZen] = useState(false);
   const appearance = useMemo(defaultAppearance, []);
   const control = useMemo(() => presetById(controlId), [controlId]);
 
@@ -124,6 +131,8 @@ export default function App() {
         appearance={appearance}
         names={screen.names}
         onExit={goHome}
+        zen={zen}
+        onToggleZen={() => setZen((on) => !on)}
         onRematch={(swapSides) =>
           setScreen((current) =>
             current.name !== 'game'

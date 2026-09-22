@@ -3,6 +3,10 @@
    animations @sps/board has no DOM to define (motion.ts names them, this
    times and shapes them). */
 
+/* One column by default — spec 10.11's phone order, top to bottom: opponent
+   panel, board, your panel, then the controls. Everything below widens that
+   into two columns; nothing here assumes a wide screen, so a phone never
+   pays for the desktop layout. */
 .game {
   display: flex;
   flex-direction: column;
@@ -12,6 +16,63 @@
   margin: 0 auto;
   padding: 0.5rem 0 2rem;
 }
+
+.game-board,
+.game-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-width: 0;
+}
+
+/* Spec 10.11: "Desktop: board on the left; panels and move list on the
+   right." The `game--rail` class is applied by Game.tsx from ONE breakpoint
+   constant (RAIL_MIN_PX), rather than by a media query here — two numbers
+   that must agree is two numbers that will eventually disagree.
+
+   The panels stay welded to the board rather than moving into the rail:
+   they are corner-anchored (see `.panel`), so each name sits beside its own
+   corner square. Floating them into a side column would undo that. It is a
+   deliberate departure from 10.11's letter, in favour of a thing 10.11
+   predates. */
+.game--rail {
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1.5rem;
+  max-width: none;
+  flex-wrap: wrap;
+}
+.game--rail > .back {
+  flex-basis: 100%; /* its own row, above both columns */
+  /* A full-width flex item, so `align-self` does nothing horizontally here
+     and the button's own centring would take over. */
+  text-align: left;
+  max-width: 984px; /* line up with the columns it sits above, not the viewport */
+}
+.game--rail .game-board {
+  width: auto;
+  flex: 0 0 auto;
+}
+.game--rail .game-side {
+  width: 20rem;
+  flex: 0 0 20rem;
+  align-items: stretch;
+  /* Sticks beside a tall board rather than trailing off the bottom of it. */
+  position: sticky;
+  top: 0.5rem;
+}
+/* In the rail these size to the column, not to the board. */
+.game--rail .game-side .movelist,
+.game--rail .game-side .game-over,
+.game--rail .game-side .status {
+  width: 100%;
+}
+.game--rail .game-side .status { text-align: left; }
+.game--rail .game-side .bar { justify-content: flex-start; }
+.game--rail .game-side .movelist-rows { max-height: 22rem; }
 
 .back {
   align-self: flex-start;
@@ -328,3 +389,49 @@
 }
 
 .game-over-reason { margin: 0 0 0.6rem; font-size: 0.9rem; color: var(--muted); }
+
+/* --- Zen (C2): the quiet board ------------------------------------------
+   What stays: the board, both clocks, both type counts, and the control bar
+   — so a game can still be undone, drawn, aborted or resigned without
+   leaving Zen to do it. What goes: the names, the move list, and the status
+   line's visible text. `packages/match`'s `visibleAids` decides the AIDS
+   half of this and keeps the counts; these rules are only the chrome. */
+
+.game--zen .panel-name--bare {
+  /* The name is gone but its dot remains, so the two rows are still told
+     apart by something other than position. */
+  flex: none;
+}
+
+/* The standard visually-hidden clip. Deliberately NOT `display: none`: the
+   status line is the polite live region that announces every move (spec
+   10.6), and a quiet board is a request about the eyes, not the ears.
+
+   `!important` throughout, which is the convention for this utility and is
+   earned here: `.status` is also a Home-screen class in styles.css, which
+   loads after this file and was re-adding its padding and left border to a
+   line that is supposed to have no box at all. A hiding utility that only
+   works depending on stylesheet order is not a hiding utility. */
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+/* The toggle sits in the bar, which is the one thing Zen keeps — so the way
+   out is exactly where the way in was. */
+.bar button.zen--on {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+/* A little more air around a board with nothing else competing for it. */
+.game--zen { gap: 0.75rem; }
+.game--zen .back { opacity: 0.55; }
+.game--zen .back:hover { opacity: 1; }

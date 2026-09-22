@@ -13,7 +13,7 @@ the previous milestone's "done when" holds.**
 | M2 | AI and the `tools/sim` harness | Balance runs land near §6 for all three variants | **built** |
 | M3 | Board UI and pass-and-play, Original only | Two people can finish a game on one phone | **done** |
 | C1 | Clocks, offers and time gifts (`docs/ADDENDUM-CLOCKS.md`) | Clock, offers and gift policy green; engine still timer-free | **done, and rendered (M3c)** |
-| C2 | Premove, abort, low-time warning, Zen | Logic green; rendering waits on M3 | **done; abort and low-time rendered (M3c) — premove and Zen wait on M4/M6** |
+| C2 | Premove, abort, low-time warning, Zen | Logic green; rendering waits on M3 | **done; abort and low-time rendered (M3c), Zen rendered with the Rail — premove is the last piece, and M4 unblocked it** |
 | M4 | Play against the computer: worker, three levels, undo | Hard stays inside its time budget on a phone | **done** |
 | M4b | Board orientation, and the four cuts it was blocking: side picker, corner-anchored panels, move list + game-over overlay, Undo's clock refund | Playable as Red; §10.7's four buttons all work; Undo puts both clocks back | **done** |
 | M5 | 2×2 Corner and Neutrals, and the variant picker | All three variants playable both ways | **done** |
@@ -325,6 +325,66 @@ folded in here.
 **Undo against the computer takes back two plies (spec 10.8)**, landing back
 on the human's own turn — verified by playing one exchange and undoing it
 back to the empty history. It did not refund clock time; **M4b below does.**
+
+## The Rail layout and Zen
+
+Two things `docs/VISUAL_SYSTEM.md` decision 4 had deferred past M3, built
+together because the first decides how the second looks.
+
+**The Rail (spec 10.11's desktop layout).** Board on the left, options on the
+right, one column below the breakpoint. Three decisions worth keeping:
+
+* **The breakpoint is a TypeScript constant applied as a class, not a media
+  query.** `RAIL_MIN_PX` decides the layout *and* feeds the board's own
+  sizing, because spec 10.2 makes board width depend on "the space left after
+  the panels". Two numbers that have to agree are two numbers that eventually
+  will not.
+* **1024 is derived, not picked.** A 640 board, a 20rem rail and the gap
+  between them come to just under it, so the rail never squeezes the board —
+  verified at 1000 (stacked, board 640) and 1100 (railed, board 640).
+* **The panels stay welded to the board**, which is a deliberate departure
+  from 10.11's "panels and move list on the right". They are corner-anchored
+  (M4b), so each name sits beside its own corner square; floating them into a
+  side column would undo the thing that makes them worth having. 10.11
+  predates that decision.
+
+**Zen** now renders, and Vig's definition of it changed what the addendum
+first specified. Zen keeps the clocks, the **type counts** and the control
+bar; it drops the names, the move list and the status line's visible text.
+
+`ZEN_AIDS` in `settings.ts` is where that lives, and the reasoning is in the
+comment above it: the counts are the only aid that *reports* the position
+rather than *advising* on it. Threat lines, the race meter, shields, the Keep
+lock, danger marks and the hint all tell you what to think; the counts only
+say what is on the board, which you could get by counting. Hiding them buys
+clerical work, not depth.
+
+Two properties that were already true and stayed true: Zen overrides rather
+than overwrites, so leaving it restores the player's own choices; and it never
+turns an aid back **on** that the player had switched off — a test covers each.
+
+**The status line is hidden to look at, not to hear.** It stays in the DOM as
+the polite live region every move is announced through (spec 10.6, 10.10),
+clipped with `.sr-only` rather than `display: none`, which would take it out
+of the accessibility tree as well. A quiet board is a request about the eyes.
+Each panel keeps its name the same way, because the counts alone do not say
+whose they are — without it a screen reader would read two identical rows of
+numbers.
+
+**The toggle is in the control bar**, not behind a Settings screen (there
+still is not one — spec 10.1's Settings is unbuilt). The bar is the one piece
+of chrome Zen keeps, so the way out is exactly where the way in was. Zen lives
+in `App` rather than `Game` because a rematch remounts `Game`, and a player who
+asked for quiet should not have to ask again every game. It is session-only;
+persisting it is M8 (`localStorage`, spec 10.13).
+
+**One bug fixed on the way, and it was not a layout bug.** On a 375px phone the
+board rendered 475px wide and clipped the a-file off the edge. `useBoardPx`
+read `window.innerWidth` on a `resize` event, and that event can lag or be
+missed when the viewport changes without a user gesture — leaving the board
+sized for the *previous* viewport. It now uses a `ResizeObserver`, which
+reports the real box every time, and it subtracts the rail, which is spec
+10.2's "space left after the panels" finally meaning something.
 
 ## Fixed after M4b — three bugs Vig hit by playing it
 

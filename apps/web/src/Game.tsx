@@ -122,6 +122,13 @@ export interface GameProps {
   /** Spec 10.1's Review screen: a finished or shared game, nothing playable. */
   reviewOnly?: boolean;
   /**
+   * The quiet board (C2). Held by the caller so it survives a rematch, which
+   * remounts this component — a player who asked for quiet should not have to
+   * ask again every game.
+   */
+  zen?: boolean;
+  onToggleZen?: () => void;
+  /**
    * Pass-and-play's optional player names (Home's name fields), keyed by
    * side. Blank or missing falls back to the colour name — this is wording
    * only; `humanSide`/`viewerSide` and the rules still mean Blue and Red.
@@ -129,17 +136,84 @@ export interface GameProps {
   names?: SideNames;
 }
 
-function useBoardPx(): number {
-  // spec 10.2: min(viewport - 32, space left by panels, 640). This app has no
-  // side rail yet (that's the Rail layout, deferred past M3 — decision 4 of
-  // docs/VISUAL_SYSTEM.md), so "space left by panels" is the full width.
-  const [px, setPx] = useState(() => (typeof window === 'undefined' ? 360 : Math.min(window.innerWidth - 32, 640)));
+/** Spec 10.2's ceiling, and a floor so the board never collapses to nothing. */
+const MAX_BOARD_PX = 640;
+const MIN_BOARD_PX = 240;
+/** The page's own left+right gutters, spec 10.2's "viewport minus 32". */
+const BOARD_GUTTERS_PX = 32;
+/** Matches `.game--rail .game-side` (20rem) and `.game--rail`'s gap (1.5rem). */
+const RAIL_WIDTH_PX = 320;
+const RAIL_GAP_PX = 24;
+
+/**
+ * Spec 10.2: the board is the smaller of the viewport minus 32, **the space
+ * left after the panels**, and 640.
+ *
+ * `railed` is that middle term — the only thing that ever takes width away
+ * from the board here. It is passed in rather than read from a media query so
+ * that one constant (`RAIL_MIN_PX`) decides both the layout and the size, and
+ * so Zen — which collapses the rail — gets the wider board for free.
+ *
+ * A `ResizeObserver` rather than `window.resize` alone. The resize event can
+ * lag or be missed when the viewport changes without a user gesture (a device
+ * rotating, a desktop pane being dragged, a devtools viewport being set), and
+ * a missed one leaves the board sized for the OLD viewport — which is how a
+ * 475px board ended up inside a 425px phone, clipping the a-file off the edge.
+ * The observer reports the real box every time.
+ */
+function useBoardPx(railed: boolean): number {
+  const measure = useCallback(() => {
+    if (typeof window === 'undefined') return 360;
+    const available = window.innerWidth - BOARD_GUTTERS_PX - (railed ? RAIL_WIDTH_PX + RAIL_GAP_PX : 0);
+    return Math.max(MIN_BOARD_PX, Math.min(available, MAX_BOARD_PX));
+  }, [railed]);
+
+  const [px, setPx] = useState(measure);
+
   useEffect(() => {
-    const onResize = () => setPx(Math.min(window.innerWidth - 32, 640));
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
+    const update = () => setPx(measure());
+    update(); // `railed` may have just changed under us
+    const observer = new ResizeObserver(update);
+    observer.observe(document.documentElement);
+    window.addEventListener('resize', update);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, [measure]);
+
   return px;
+}
+
+/**
+ * Spec 10.11: "Desktop: board on the left; panels and move list on the right."
+ *
+ * The breakpoint is defined here, once, and applied as a class rather than as
+ * a CSS media query, so the stylesheet and this file cannot drift apart about
+ * where the layout changes.
+ *
+ * 1024 is not arbitrary. Spec 10.2 sizes the board as the smaller of the
+ * viewport minus 32, the space left after the panels, and 640 — so the rail
+ * must not squeeze the board. A 640 board, a 20rem rail and the gap between
+ * them come to just under 1024 with the page's own padding, which is the
+ * narrowest width where the board still gets its full size. Below it the
+ * column stacks instead, which is what a phone gets (spec 10.11's own
+ * portrait order: opponent, board, you, controls).
+ */
+const RAIL_MIN_PX = 1024;
+
+function useRail(): boolean {
+  const query = `(min-width: ${RAIL_MIN_PX}px)`;
+  const [railed, setRailed] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(query).matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const onChange = () => setRailed(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, [query]);
+  return railed;
 }
 
 /**
@@ -255,8 +329,13 @@ export default function Game({
   initialResult = null,
   reviewOnly = false,
   names = {},
+  zen = false,
+  onToggleZen,
 }: GameProps) {
-  const boardPx = useBoardPx();
+  const railed = useRail();
+  // Zen collapses the rail, so the board gets that width back (see `.game--zen`).
+  const showRail = railed && !zen;
+  const boardPx = useBoardPx(showRail);
   const squarePx = boardPx / 9;
   const reducedMotion = usePrefersReducedMotion();
   const wideEnoughForList = useWideEnoughForList();
@@ -1032,14 +1111,23 @@ export default function Game({
     // `--board-px` is the one number the panels, the move list and the overlay
     // all line up against, and it is the SAME number the renderer is handed —
     // so the layout cannot drift from the board it is framing.
-    <div className="game" style={{ '--board-px': `${boardPx}px` } as React.CSSProperties}>
+    <div
+      // Two columns on a desktop, one on a phone (spec 10.11). Zen collapses
+      // back to one whatever the width: with the move list and the status
+      // line gone the rail would be an empty column holding four buttons,
+      // and a centred board is the whole point of the quiet view.
+      className={`game${showRail ? ' game--rail' : ''}${zen ? ' game--zen' : ''}`}
+      style={{ '--board-px': `${boardPx}px` } as React.CSSProperties}
+    >
       <button className="back" onClick={onExit} type="button">
         ← Home
       </button>
 
+      <div className="game-board">
       <Panel
         side={opponentSide}
         name={sideName(opponentSide, names)}
+        showName={!zen}
         place="opponent"
         counts={counts[opponentSide]}
         remainingMs={reviewOnly ? null : remainingAt(clock, opponentSide, now)}
@@ -1084,6 +1172,7 @@ export default function Game({
       <Panel
         side={humanSide}
         name={sideName(humanSide, names)}
+        showName={!zen}
         place="you"
         counts={counts[humanSide]}
         remainingMs={reviewOnly ? null : remainingAt(clock, humanSide, now)}
@@ -1095,8 +1184,16 @@ export default function Game({
             : null
         }
       />
+      </div>
 
-      <p className="status" aria-live="polite">
+      <div className="game-side">
+      {/* Zen hides the status line to look at, not to hear: it stays in the
+          DOM as the polite live region every move is announced through
+          (spec 10.6, 10.10). A quiet board is a visual request, and dropping
+          a screen reader's only narration to honour it would be a poor
+          trade. `.sr-only` is the standard clip, not `display: none`, which
+          would take it out of the accessibility tree too. */}
+      <p className={`status${zen ? ' sr-only' : ''}`} aria-live="polite">
         {thinking ? 'Computer is thinking…' : status}
       </p>
 
@@ -1172,15 +1269,35 @@ export default function Game({
           <button type="button" onClick={doResign} disabled={gameOver} className="resign" title="Resign">
             ⚐
           </button>
+          {onToggleZen && (
+            // The toggle lives in the bar rather than behind a Settings
+            // screen because the bar is the one thing Zen keeps — so the way
+            // out is always exactly where the way in was.
+            <button
+              type="button"
+              onClick={onToggleZen}
+              className={`zen${zen ? ' zen--on' : ''}`}
+              aria-pressed={zen}
+              title={zen ? 'Leave Zen — show names and the move list' : 'Zen — board, clocks and counts only'}
+            >
+              ☯
+            </button>
+          )}
         </div>
       )}
 
-      <MoveList
-        moves={history}
-        viewPly={viewPly}
-        defaultOpen={wideEnoughForList}
-        onPick={(ply) => setViewPly(ply)}
-      />
+      {/* Zen drops the move list entirely (not merely closed): the drawer's
+          own summary row is chrome too, and leaving it would half-honour the
+          request. Review still opens it, because stepping through a game
+          with no list of moves is not a quiet board, it is a broken one. */}
+      {(!zen || reviewing) && (
+        <MoveList
+          moves={history}
+          viewPly={viewPly}
+          defaultOpen={wideEnoughForList}
+          onPick={(ply) => setViewPly(ply)}
+        />
+      )}
 
       {gameState.result && summary && !reviewing && (
         <GameOver
@@ -1197,6 +1314,7 @@ export default function Game({
           copyNote={copyNote}
         />
       )}
+      </div>
     </div>
   );
 }
@@ -1215,6 +1333,8 @@ interface PanelProps {
    * rotated board.
    */
   place: 'you' | 'opponent';
+  /** Zen keeps the clocks and counts but drops the names (C2). */
+  showName: boolean;
   counts: Record<PieceType, number>;
   /**
    * null hides the chip entirely, which is what a review wants: the record
@@ -1230,15 +1350,26 @@ interface PanelProps {
   onGiveTime: (() => void) | null;
 }
 
-function Panel({ side, name, place, counts, remainingMs, urgency, running, onGiveTime }: PanelProps) {
+function Panel({ side, name, showName, place, counts, remainingMs, urgency, running, onGiveTime }: PanelProps) {
   return (
     <div className={`panel panel--${place} panel--${side}`}>
-      <span className="panel-name">
-        {/* Colour alone never carries ownership (spec 10.3, CLAUDE.md), so the
-            swatch is decoration beside a name that already says which side. */}
-        <span className="panel-dot" aria-hidden="true" />
-        <span className="panel-name-text">{name}</span>
-      </span>
+      {showName ? (
+        <span className="panel-name">
+          {/* Colour alone never carries ownership (spec 10.3, CLAUDE.md), so the
+              swatch is decoration beside a name that already says which side. */}
+          <span className="panel-dot" aria-hidden="true" />
+          <span className="panel-name-text">{name}</span>
+        </span>
+      ) : (
+        // Zen drops the name, but the dot stays and keeps its label. Without
+        // it the two rows would be told apart by position alone — and the
+        // counts do not say whose they are, so a screen reader would read
+        // two identical rows of numbers.
+        <span className="panel-name panel-name--bare">
+          <span className="panel-dot" aria-hidden="true" />
+          <span className="sr-only">{name}</span>
+        </span>
+      )}
       <span className="panel-counts">
         {(['rock', 'paper', 'scissors'] as const).map((type) => (
           <span key={type} className={`count${counts[type] === 0 ? ' count--out' : counts[type] === 1 ? ' count--last' : ''}`}>

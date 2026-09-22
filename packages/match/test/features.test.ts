@@ -127,9 +127,23 @@ describe('Zen mode', () => {
     expect(DEFAULT_SETTINGS.flipEachTurn).toBe(false);
   });
 
-  it('hides every aid while it is on', () => {
+  it('hides every aid except the type counts', () => {
+    // Vig's call, and a change from the addendum's original "hides every
+    // aid": Zen is a quiet board, not a bare one. The counts are the only
+    // aid that reports the position rather than advising on it, so hiding
+    // them would make the player count pieces by hand instead of thinking.
     const zen = visibleAids({ ...DEFAULT_SETTINGS, zen: true });
-    expect(Object.values(zen).some(Boolean)).toBe(false);
+    expect(zen.typeCounts).toBe(true);
+
+    const { typeCounts: _counts, ...advice } = zen;
+    expect(Object.values(advice).some(Boolean)).toBe(false);
+  });
+
+  it('still never turns an aid back ON that the player had switched off', () => {
+    // Zen quiets the player's own settings; it does not override them
+    // upward. Someone who chose to play without counts keeps that in Zen.
+    const noCounts = { ...DEFAULT_SETTINGS, aids: { ...DEFAULT_SETTINGS.aids, typeCounts: false } };
+    expect(visibleAids({ ...noCounts, zen: true }).typeCounts).toBe(false);
   });
 
   it('gives the player back their own choices, not the defaults', () => {
