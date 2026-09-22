@@ -15,12 +15,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  abortGame,
+  agreeDraw,
   applyMove,
   createGame,
   decodePiece,
   distance,
+  flag as engineFlag,
   legalMoves,
   moveToText,
+  other,
   replay,
   resign as engineResign,
   toFen,
@@ -37,12 +41,37 @@ import {
   renderPieceSample,
 } from '@sps/board';
 import type { Appearance, FamilyId, MotionKind, ThemeId } from '@sps/board';
+import {
+  GIFT_POLICIES,
+  OFFER_POLICIES,
+  canAbort,
+  canGive,
+  canOffer,
+  createClock,
+  createOffers,
+  flaggedAt,
+  giveTime,
+  offer as makeOffer,
+  accept as acceptOffer,
+  decline as declineOffer,
+  onMove as offersOnMove,
+  press as pressClock,
+  remainingAt,
+  startTurn,
+  stop as stopClock,
+  urgencyOf,
+} from '@sps/match';
+import type { ClockState, OfferState, TimeControl, Urgency } from '@sps/match';
 import { clampSquare, slideOffsetPx, squareAt } from './board-geometry.js';
 import { describeResult, describeTurn, whoseTurn } from './announce.js';
+import { formatClock } from './clock-format.js';
 import './game.css';
+
+const MODE = 'pass-and-play' as const;
 
 export interface GameProps {
   variant: VariantConfig;
+  control: TimeControl;
   theme: ThemeId;
   family: FamilyId;
   appearance: Appearance;
@@ -132,7 +161,7 @@ function victimKeyframes(motion: MotionKind): Keyframe[] {
   return [{ opacity: 1 }, { opacity: 0 }]; // wrap: fades under the captor
 }
 
-export default function Game({ variant, theme, family, appearance, onExit }: GameProps) {
+export default function Game({ variant, control, theme, family, appearance, onExit }: GameProps) {
   const boardPx = useBoardPx();
   const squarePx = boardPx / 9;
   const reducedMotion = usePrefersReducedMotion();
@@ -146,6 +175,9 @@ export default function Game({ variant, theme, family, appearance, onExit }: Gam
   const [status, setStatus] = useState<string>(() => whoseTurn(gameState.turn));
   const [lastMove, setLastMove] = useState<{ from: Square; to: Square } | null>(null);
   const [anim, setAnim] = useState<PendingAnim | null>(null);
+  const [clock, setClock] = useState<ClockState>(() => startTurn(createClock(control), 'blue', Date.now()));
+  const [offers, setOffers] = useState<OfferState>(() => createOffers(OFFER_POLICIES[MODE]));
+  const [now, setNow] = useState(() => Date.now());
 
   const legal = useMemo(() => legalMoves(gameState), [gameState]);
   const fen = useMemo(() => toFen(gameState), [gameState]);
@@ -191,6 +223,13 @@ export default function Game({ variant, theme, family, appearance, onExit }: Gam
       setFocus(move.to);
       setStatus(describeTurn(applied.events));
       setAnim({ move, motion: move.captured ? captureMotion(move.piece.type) : null });
+      // Moving answers a pending draw offer by playing on — declined (offers.ts's
+      // own rule; a rematch offer is exempt, but nothing pends one mid-game).
+      setOffers((o) => offersOnMove(o));
+      setClock((c) => {
+        const pressed = pressClock(c, Date.now());
+        return applied.state.result ? stopClock(pressed, Date.now()) : pressed;
+      });
     },
     [gameState],
   );
@@ -346,6 +385,11 @@ export default function Game({ variant, theme, family, appearance, onExit }: Gam
     const moveEvent = lastEvents?.find((e): e is Extract<typeof e, { type: 'move' }> => e.type === 'move');
     setLastMove(moveEvent ? { from: moveEvent.from, to: moveEvent.to } : null);
     setStatus(whoseTurn(replayed.state.turn));
+    // The clock resumes for whoever moves next, at whatever it currently
+    // reads. It does NOT refund the undone move's time — replaying that
+    // accurately needs the per-move remainingMs the record carries (spec
+    // 8.3), which is persistence (M8), not this milestone.
+    setClock((c) => startTurn(c, replayed.state.turn, Date.now()));
   }
 
   function doResign() {
@@ -354,7 +398,98 @@ export default function Game({ variant, theme, family, appearance, onExit }: Gam
     setGameState(resigned);
     setSelected(null);
     setStatus(describeResult(resigned.result!));
+    setClock((c) => stopClock(c, Date.now()));
   }
+
+  function doAbort() {
+    if (gameOver) return;
+    if (!canAbort(gameState.ply, MODE).ok) return;
+    const aborted = abortGame(gameState);
+    setGameState(aborted);
+    setSelected(null);
+    setStatus(describeResult(aborted.result!));
+    setClock((c) => stopClock(c, Date.now()));
+  }
+
+  function offerDraw() {
+    if (gameOver) return;
+    const by = gameState.turn;
+    if (!canOffer(offers, 'draw', by, gameState.ply).ok) return;
+    const outcome = makeOffer(offers, 'draw', by, gameState.ply);
+    setOffers(outcome.state);
+    if (outcome.accepted) settleDraw();
+  }
+
+  function settleDraw() {
+    const agreed = agreeDraw(gameState);
+    setGameState(agreed);
+    setStatus(describeResult(agreed.result!));
+    setClock((c) => stopClock(c, Date.now()));
+  }
+
+  function respondToDraw(accept: boolean) {
+    if (!offers.pending) return;
+    const responder = other(offers.pending.by);
+    if (accept) {
+      const outcome = acceptOffer(offers, responder);
+      setOffers(outcome.state);
+      settleDraw();
+    } else {
+      setOffers(declineOffer(offers, responder));
+    }
+  }
+
+  function giveTimeTo(to: Side) {
+    const from = other(to); // spec's own framing: the button beside a clock gifts it FROM the other side.
+    if (!canGive(GIFT_POLICIES[MODE], from, to).ok) return;
+    setClock((c) => giveTime(c, { ply: gameState.ply, from, to, ms: GIFT_POLICIES[MODE].ms }));
+  }
+
+  function doRematch() {
+    // One click, not an offer/accept pair: pass-and-play has both players at
+    // the device already, so there is nothing to negotiate the way a mid-game
+    // draw does — offers.ts's 'rematch' kind is for a mode where the two
+    // players aren't already agreeing in person (M5+'s online play).
+    //
+    // Not "sides swapped" (spec 10.7's other rematch button): the panels are
+    // labelled Blue/Red, not "you"/"opponent" — pass-and-play has no notion
+    // of which physical player is which side to swap, since nothing here
+    // tracks identity across a rematch. Swapping becomes meaningful once vs-
+    // computer (M4) gives colour an actual owner.
+    setHistory([]);
+    setGameState(createGame(variant));
+    setSelected(null);
+    setAnim(null);
+    setLastMove(null);
+    setOffers(createOffers(OFFER_POLICIES[MODE]));
+    setClock(startTurn(createClock(control), 'blue', Date.now()));
+    setStatus(whoseTurn('blue'));
+  }
+
+  // --- The clock: ticks `now` for a live display, and is the one place that
+  // detects a flag. `flaggedAt` is a pure query (clock.ts) — it changes
+  // nothing by itself, so the moment it reports a fallen side, THIS effect is
+  // what turns that into an actual game-over via the engine's own `flag()`
+  // (spec: the engine has no timers, so a flag is always something outside it
+  // decides and then tells it about, exactly like resign).
+  useEffect(() => {
+    if (gameOver || control.unlimited) return;
+    const interval = window.setInterval(() => {
+      const current = Date.now();
+      setNow(current);
+      const fallen = flaggedAt(clock, current);
+      if (fallen) {
+        setGameState((gs) => {
+          if (gs.result) return gs;
+          const flagged = engineFlag(gs, fallen);
+          setStatus(describeResult(flagged.result!));
+          return flagged;
+        });
+        setClock((c) => stopClock(c, current));
+      }
+    }, 250);
+    return () => window.clearInterval(interval);
+  }, [gameOver, control.unlimited, clock]);
 
   // --- Animation: the 150ms slide every move gets, and the matchup motion on
   // top of a capture. Pure arithmetic decides the slide offset (no DOM read
@@ -423,13 +558,22 @@ export default function Game({ variant, theme, family, appearance, onExit }: Gam
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anim]);
 
+  const drawOfferPending = offers.pending?.kind === 'draw' ? offers.pending : null;
+
   return (
     <div className="game">
       <button className="back" onClick={onExit} type="button">
         ← Home
       </button>
 
-      <Panel side="red" counts={counts.red} />
+      <Panel
+        side="red"
+        counts={counts.red}
+        remainingMs={remainingAt(clock, 'red', now)}
+        urgency={urgencyOf(clock, 'red', now)}
+        running={clock.running === 'red'}
+        onGiveTime={canGive(GIFT_POLICIES[MODE], 'blue', 'red').ok ? () => giveTimeTo('red') : null}
+      />
 
       <div
         ref={containerRef}
@@ -445,15 +589,45 @@ export default function Game({ variant, theme, family, appearance, onExit }: Gam
         dangerouslySetInnerHTML={{ __html: svg }}
       />
 
-      <Panel side="blue" counts={counts.blue} />
+      <Panel
+        side="blue"
+        counts={counts.blue}
+        remainingMs={remainingAt(clock, 'blue', now)}
+        urgency={urgencyOf(clock, 'blue', now)}
+        running={clock.running === 'blue'}
+        onGiveTime={canGive(GIFT_POLICIES[MODE], 'red', 'blue').ok ? () => giveTimeTo('blue') : null}
+      />
 
       <p className="status" aria-live="polite">
         {status}
       </p>
 
+      {drawOfferPending && !gameOver && (
+        <div className="offer-banner">
+          <p>{drawOfferPending.by === 'blue' ? 'Blue' : 'Red'} offers a draw.</p>
+          <button type="button" onClick={() => respondToDraw(true)}>
+            Accept
+          </button>
+          <button type="button" onClick={() => respondToDraw(false)}>
+            Decline
+          </button>
+        </div>
+      )}
+
       <div className="bar">
         <button type="button" onClick={undo} disabled={history.length === 0 || gameOver} title="Undo">
           ↺
+        </button>
+        <button
+          type="button"
+          onClick={offerDraw}
+          disabled={gameOver || drawOfferPending != null || !OFFER_POLICIES[MODE].allowed.includes('draw')}
+          title="Offer draw"
+        >
+          ½
+        </button>
+        <button type="button" onClick={doAbort} disabled={gameOver || !canAbort(gameState.ply, MODE).ok} title="Abort game">
+          ⊗
         </button>
         <button type="button" onClick={doResign} disabled={gameOver} className="resign" title="Resign">
           ⚐
@@ -463,13 +637,26 @@ export default function Game({ variant, theme, family, appearance, onExit }: Gam
       {gameState.result && (
         <div className="game-over">
           <p>{describeResult(gameState.result)}</p>
+          <button type="button" onClick={doRematch} className="play">
+            Rematch
+          </button>
         </div>
       )}
     </div>
   );
 }
 
-function Panel({ side, counts }: { side: Side; counts: Record<PieceType, number> }) {
+interface PanelProps {
+  side: Side;
+  counts: Record<PieceType, number>;
+  remainingMs: number;
+  urgency: Urgency;
+  running: boolean;
+  /** null when this mode/direction can't gift time (spec: e.g. self-gift, off outside vs-computer). */
+  onGiveTime: (() => void) | null;
+}
+
+function Panel({ side, counts, remainingMs, urgency, running, onGiveTime }: PanelProps) {
   return (
     <div className={`panel panel--${side}`}>
       <span className="panel-name">{side === 'blue' ? 'Blue' : 'Red'}</span>
@@ -480,6 +667,14 @@ function Panel({ side, counts }: { side: Side; counts: Record<PieceType, number>
             {counts[type]}
           </span>
         ))}
+      </span>
+      <span className={`clock-chip clock-chip--${urgency}${running ? ' clock-chip--running' : ''}`}>
+        {formatClock(remainingMs)}
+        {onGiveTime && (
+          <button type="button" className="gift" onClick={onGiveTime} title={`Give ${side === 'blue' ? 'Blue' : 'Red'} 15s`}>
+            +
+          </button>
+        )}
       </span>
     </div>
   );

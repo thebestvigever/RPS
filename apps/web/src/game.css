@@ -91,3 +91,54 @@
   position: absolute;
   pointer-events: none;
 }
+
+/* M3c — clocks, offers, abort, rematch (docs/VISUAL_SYSTEM.md 8). */
+
+.clock-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 6px;
+  background: var(--square-alt);
+}
+.clock-chip--running { background: var(--blue); color: white; }
+.clock-chip--low { color: var(--alert, #b0781c); }
+.clock-chip--running.clock-chip--low { background: var(--alert, #b0781c); color: white; }
+.clock-chip--critical { color: var(--red); font-weight: 700; }
+.clock-chip--running.clock-chip--critical { background: var(--red); color: white; }
+
+.clock-chip .gift {
+  width: 18px;
+  height: 18px;
+  line-height: 1;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  background: none;
+  color: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.offer-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--blue);
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+.offer-banner p { margin: 0; flex: 1; }
+.offer-banner button {
+  border: 1px solid var(--grid);
+  background: var(--paper);
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+}
+
+.game-over .play { margin-top: 0.5rem; width: auto; padding: 0.5rem 1.25rem; }

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { VARIANTS, VARIANT_BLURBS, VARIANT_IDS } from '@sps/engine';
 import type { VariantId } from '@sps/engine';
+import { PRESETS, presetById } from '@sps/match';
 import Game from './Game.js';
 import { defaultAppearance } from './Board.js';
 import './styles.css';
@@ -15,15 +16,25 @@ import './styles.css';
 // cue, danger diamonds, the rest of spec 10.5's aids).
 type Screen = { name: 'home' } | { name: 'game'; variant: VariantId };
 
+// docs/BUILD_PLAN.md's C1 leftover: "the time-control picker... waits on
+// visual direction." M3c is that direction, so it's built here rather than
+// defaulting silently — a clock with no way to choose its length would be an
+// odd thing to ship. "10+5" reads as a reasonable first game on this game's
+// own pace (spec 6.1: ~67 moves a side, not chess's 40).
+const DEFAULT_CONTROL_ID = '10+5';
+
 export default function App() {
   const [screen, setScreen] = useState<Screen>({ name: 'home' });
   const [selected, setSelected] = useState<VariantId>('original');
+  const [controlId, setControlId] = useState(DEFAULT_CONTROL_ID);
   const appearance = useMemo(defaultAppearance, []);
+  const control = useMemo(() => presetById(controlId), [controlId]);
 
   if (screen.name === 'game') {
     return (
       <Game
         variant={VARIANTS[screen.variant]}
+        control={control}
         theme="field-notes"
         family="cut-stone"
         appearance={appearance}
@@ -59,6 +70,17 @@ export default function App() {
           <p>{VARIANT_BLURBS[id]}</p>
         </section>
       ))}
+
+      <label className="time-control">
+        Time control
+        <select value={controlId} onChange={(event) => setControlId(event.target.value)}>
+          {PRESETS.map((preset) => (
+            <option key={preset.id} value={preset.id}>
+              {preset.name}
+            </option>
+          ))}
+        </select>
+      </label>
 
       <button className="play" type="button" onClick={() => setScreen({ name: 'game', variant: selected })}>
         Play pass-and-play — {VARIANTS[selected].name}
