@@ -43,12 +43,14 @@ import {
   THEMES,
   captureMotion,
   illegalCaptureReason,
+  neutralSelectionText,
   displayCell,
   pieceTypeName,
   renderBoard,
   renderPieceSample,
+  sideName,
 } from '@sps/board';
-import type { Appearance, FamilyId, MotionKind, Orientation, ThemeId } from '@sps/board';
+import type { Appearance, FamilyId, MotionKind, Orientation, SideNames, ThemeId } from '@sps/board';
 import {
   GIFT_POLICIES,
   OFFER_POLICIES,
@@ -119,6 +121,12 @@ export interface GameProps {
   initialResult?: GameResult | null;
   /** Spec 10.1's Review screen: a finished or shared game, nothing playable. */
   reviewOnly?: boolean;
+  /**
+   * Pass-and-play's optional player names (Home's name fields), keyed by
+   * side. Blank or missing falls back to the colour name — this is wording
+   * only; `humanSide`/`viewerSide` and the rules still mean Blue and Red.
+   */
+  names?: SideNames;
 }
 
 function useBoardPx(): number {
@@ -246,6 +254,7 @@ export default function Game({
   initialMoves,
   initialResult = null,
   reviewOnly = false,
+  names = {},
 }: GameProps) {
   const boardPx = useBoardPx();
   const squarePx = boardPx / 9;
@@ -289,7 +298,7 @@ export default function Game({
   const [selected, setSelected] = useState<Square | null>(null);
   const [focus, setFocus] = useState<Square>(0);
   const [status, setStatus] = useState<string>(() =>
-    initialResult ? describeResult(initialResult) : whoseTurn(opening.state.turn),
+    initialResult ? describeResult(initialResult, names) : whoseTurn(opening.state.turn, names),
   );
   const [lastMove, setLastMove] = useState<{ from: Square; to: Square } | null>(null);
   const [anim, setAnim] = useState<PendingAnim | null>(null);
@@ -387,6 +396,25 @@ export default function Game({
     };
   }, [selected, legal]);
 
+  /**
+   * Spec 10.4's "subtle pulse": every neutral piece with a capture on offer
+   * right now. `legal` is already `legalMoves` for whoever's turn it is, so
+   * this needs no separate "is it their turn" check — a neutral's capture
+   * only ever appears here when the side to move could actually play it.
+   * Reviewing shows a finished position, not a turn to take, so it pulses
+   * nothing, the same reasoning `focusSquare` below already uses.
+   */
+  const pulseSquares = useMemo(() => {
+    if (reviewing) return [];
+    const squares = new Set<Square>();
+    for (const move of legal) {
+      if (move.captured != null && decodePiece(gameState.board[move.from]!)?.owner === 'neutral') {
+        squares.add(move.from);
+      }
+    }
+    return [...squares];
+  }, [legal, reviewing, gameState.board]);
+
   const svg = useMemo(
     () =>
       renderBoard({
@@ -399,6 +427,7 @@ export default function Game({
         orientation,
         lastMove: shownLastMove,
         selection,
+        pulseSquares,
         // No cursor over a position that cannot be played — its dashed ring
         // would promise an input that does nothing — and none until the
         // keyboard is actually driving.
@@ -414,6 +443,7 @@ export default function Game({
       orientation,
       shownLastMove,
       selection,
+      pulseSquares,
       focus,
       reviewing,
       keyboardCursor,
@@ -436,7 +466,7 @@ export default function Game({
       setLastMove({ from: move.from, to: move.to });
       setSelected(null);
       setFocus(move.to);
-      setStatus(describeTurn(applied.events));
+      setStatus(describeTurn(applied.events, names));
       setAnim({ move, motion: move.captured ? captureMotion(move.piece.type) : null });
       // Moving answers a pending draw offer by playing on — declined (offers.ts's
       // own rule; a rematch offer is exempt, but nothing pends one mid-game).
@@ -444,7 +474,26 @@ export default function Game({
       setClock(next);
       setClockStack((stack) => [...stack, next]);
     },
-    [gameState, clock],
+    [gameState, clock, names],
+  );
+
+  /**
+   * `setSelected` plus spec 10.4's neutral-only wording: selecting a neutral
+   * with a capture on offer names it ("Using the neutral Paper — capture a
+   * Red Rock"); selecting one with nothing to capture explains why tapping
+   * it did not queue a move. A side's own piece says nothing extra here — the
+   * status line already reads "Blue's move." for that.
+   */
+  const selectSquare = useCallback(
+    (square: Square) => {
+      setSelected(square);
+      const piece = decodePiece(gameState.board[square]!);
+      if (piece?.owner === 'neutral') {
+        const hasCapture = legal.some((m) => m.from === square && m.captured != null);
+        setStatus(neutralSelectionText(piece.type, other(gameState.turn), hasCapture, names));
+      }
+    },
+    [gameState.board, gameState.turn, legal, names],
   );
 
   /** The shared core of a tap-elsewhere and a drag-release: what happens when
@@ -457,7 +506,7 @@ export default function Game({
         return;
       }
       if (isSelectable(to)) {
-        setSelected(to); // your own other piece: reselect to it
+        selectSquare(to); // your own other piece: reselect to it
         return;
       }
       const fromPiece = decodePiece(gameState.board[from]!);
@@ -477,14 +526,26 @@ export default function Game({
       }
       setSelected(null); // empty, out of reach, or anything else: cancel
     },
-    [legal, isSelectable, doMove, gameState.board],
+    [legal, isSelectable, doMove, gameState.board, selectSquare],
   );
 
   const resolveClick = useCallback(
     (square: Square) => {
       if (gameOver) return;
       if (selected == null) {
-        if (isSelectable(square)) setSelected(square);
+        if (isSelectable(square)) {
+          selectSquare(square);
+          return;
+        }
+        // A neutral with nothing to capture has no legal move, so it never
+        // passes `isSelectable` — but spec 10.4 still wants the tap explained
+        // rather than silently doing nothing.
+        if (humanTurn && !reviewing) {
+          const piece = decodePiece(gameState.board[square]!);
+          if (piece?.owner === 'neutral') {
+            setStatus(neutralSelectionText(piece.type, other(gameState.turn), false, names));
+          }
+        }
         return;
       }
       if (square === selected) {
@@ -493,7 +554,7 @@ export default function Game({
       }
       resolveDestination(selected, square);
     },
-    [gameOver, selected, isSelectable, resolveDestination],
+    [gameOver, selected, isSelectable, selectSquare, resolveDestination, humanTurn, reviewing, gameState.board, gameState.turn, names],
   );
 
   // --- Pointer input: tap AND drag share resolveClick/resolveDestination.
@@ -640,7 +701,7 @@ export default function Game({
     const lastEvents = replayed.events.at(-1);
     const moveEvent = lastEvents?.find((e): e is Extract<typeof e, { type: 'move' }> => e.type === 'move');
     setLastMove(moveEvent ? { from: moveEvent.from, to: moveEvent.to } : null);
-    setStatus(whoseTurn(replayed.state.turn));
+    setStatus(whoseTurn(replayed.state.turn, names));
 
     // The clock goes back to what it read when that position was first
     // reached — both sides, and the stage each was in, not just the player
@@ -664,7 +725,7 @@ export default function Game({
     const resigned = engineResign(gameState, gameState.turn);
     setGameState(resigned);
     setSelected(null);
-    setStatus(describeResult(resigned.result!));
+    setStatus(describeResult(resigned.result!, names));
     setClock((c) => stopClock(c, Date.now()));
   }
 
@@ -674,7 +735,7 @@ export default function Game({
     const aborted = abortGame(gameState);
     setGameState(aborted);
     setSelected(null);
-    setStatus(describeResult(aborted.result!));
+    setStatus(describeResult(aborted.result!, names));
     setClock((c) => stopClock(c, Date.now()));
   }
 
@@ -690,7 +751,7 @@ export default function Game({
   function settleDraw() {
     const agreed = agreeDraw(gameState);
     setGameState(agreed);
-    setStatus(describeResult(agreed.result!));
+    setStatus(describeResult(agreed.result!, names));
     setClock((c) => stopClock(c, Date.now()));
   }
 
@@ -792,14 +853,14 @@ export default function Game({
         setGameState((gs) => {
           if (gs.result) return gs;
           const flagged = engineFlag(gs, fallen);
-          setStatus(describeResult(flagged.result!));
+          setStatus(describeResult(flagged.result!, names));
           return flagged;
         });
         setClock((c) => stopClock(c, current));
       }
     }, 250);
     return () => window.clearInterval(interval);
-  }, [gameOver, reviewOnly, control.unlimited, clock]);
+  }, [gameOver, reviewOnly, control.unlimited, clock, names]);
 
   // --- The computer opponent (M4): one worker for the component's life
   // (spec 9.4, "search never blocks the board"), a message handler kept
@@ -906,14 +967,8 @@ export default function Game({
 
     let overlay: HTMLDivElement | null = null;
     const captured = anim.move.captured;
-    // Neutrals never trigger this in Original (M3's only variant, spec 5), and
-    // renderPieceSample only knows the yours/opponent side treatment, not a
-    // neutral's dashed ring — so a neutral capture skips the overlay rather
-    // than drawing it wrong. M5 (Neutrals in the UI) owns fixing that.
-    // (Narrowing `captured.owner` directly, rather than through an
-    // intermediate alias, is what lets TS carry "not neutral" through to
-    // `Record<Side, string>` below.)
-    if (anim.motion && captured && captured.owner !== 'neutral') {
+    if (anim.motion && captured) {
+      const isNeutral = captured.owner === 'neutral';
       const square = anim.move.to; // captures land ON the taken piece's square
       // Screen cell, not the raw index: the overlay sits on top of the board
       // in page coordinates, so it has to be placed where the square is DRAWN.
@@ -931,12 +986,17 @@ export default function Game({
         family,
         mode: squarePx * 0.62 >= 32 ? 'standalone' : 'knockout',
         squarePx,
-        color: view.sideColors[captured.owner],
+        // A neutral has no side colour of its own — the theme's dedicated
+        // token, same one `piecesLayer` paints it with everywhere else.
+        // Narrowing `captured.owner` directly (not via `isNeutral`) is what
+        // lets TS carry "not neutral" through to `Record<Side, string>`.
+        color: captured.owner !== 'neutral' ? view.sideColors[captured.owner] : THEMES[theme].neutral,
         // The overlay sits exactly over the real square, so painting a
         // knockout mark in the theme's actual square colour reads as
         // seamless against what's already underneath it.
         squareColor: THEMES[theme].square,
-        isOpponent: captured.owner !== view.viewerSide,
+        isOpponent: !isNeutral && captured.owner !== view.viewerSide,
+        isNeutral,
       });
       container.appendChild(overlay);
       const victimAnim = overlay.animate(victimKeyframes(anim.motion), {
@@ -979,6 +1039,7 @@ export default function Game({
 
       <Panel
         side={opponentSide}
+        name={sideName(opponentSide, names)}
         place="opponent"
         counts={counts[opponentSide]}
         remainingMs={reviewOnly ? null : remainingAt(clock, opponentSide, now)}
@@ -1022,6 +1083,7 @@ export default function Game({
 
       <Panel
         side={humanSide}
+        name={sideName(humanSide, names)}
         place="you"
         counts={counts[humanSide]}
         remainingMs={reviewOnly ? null : remainingAt(clock, humanSide, now)}
@@ -1040,7 +1102,7 @@ export default function Game({
 
       {drawOfferPending && !gameOver && (
         <div className="offer-banner">
-          <p>{drawOfferPending.by === 'blue' ? 'Blue' : 'Red'} offers a draw.</p>
+          <p>{sideName(drawOfferPending.by, names)} offers a draw.</p>
           <button type="button" onClick={() => respondToDraw(true)}>
             Accept
           </button>
@@ -1125,6 +1187,7 @@ export default function Game({
           result={gameState.result}
           summary={summary}
           humanSide={computer ? humanSide : null}
+          names={names}
           onRematch={() => rematch(false)}
           // Nothing to swap in pass-and-play: both players are on the one
           // device and neither of them "is" a side the board is drawn for.
@@ -1140,6 +1203,8 @@ export default function Game({
 
 interface PanelProps {
   side: Side;
+  /** Display name — the custom pass-and-play name if one was given, else the colour name (`sideName`). */
+  name: string;
   /**
    * Which corner this panel belongs beside, NOT which colour it is. Each
    * player's name sits by their own corner (the Bar layout,
@@ -1165,15 +1230,14 @@ interface PanelProps {
   onGiveTime: (() => void) | null;
 }
 
-function Panel({ side, place, counts, remainingMs, urgency, running, onGiveTime }: PanelProps) {
-  const name = side === 'blue' ? 'Blue' : 'Red';
+function Panel({ side, name, place, counts, remainingMs, urgency, running, onGiveTime }: PanelProps) {
   return (
     <div className={`panel panel--${place} panel--${side}`}>
       <span className="panel-name">
         {/* Colour alone never carries ownership (spec 10.3, CLAUDE.md), so the
             swatch is decoration beside a name that already says which side. */}
         <span className="panel-dot" aria-hidden="true" />
-        {name}
+        <span className="panel-name-text">{name}</span>
       </span>
       <span className="panel-counts">
         {(['rock', 'paper', 'scissors'] as const).map((type) => (

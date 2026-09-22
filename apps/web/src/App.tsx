@@ -4,6 +4,7 @@ import type { GameRecord, Side, VariantId } from '@sps/engine';
 import { PRESETS, presetById } from '@sps/match';
 import { LEVELS } from '@sps/ai';
 import type { Level } from '@sps/ai';
+import type { SideNames } from '@sps/board';
 import Game from './Game.js';
 import type { Computer } from './Game.js';
 import { defaultAppearance } from './Board.js';
@@ -31,6 +32,8 @@ type Screen =
        * that is supposed to be new.
        */
       round: number;
+      /** Pass-and-play's optional player names, set from Home. Empty for vs-computer — that panel still reads Blue/Red. */
+      names: SideNames;
     }
   | { name: 'review'; record: GameRecord };
 
@@ -76,6 +79,8 @@ export default function App() {
   const [mode, setMode] = useState<Mode>('pass-and-play');
   const [level, setLevel] = useState<Level>('medium');
   const [sideChoice, setSideChoice] = useState<SideChoice>('blue');
+  const [blueName, setBlueName] = useState('');
+  const [redName, setRedName] = useState('');
   const appearance = useMemo(defaultAppearance, []);
   const control = useMemo(() => presetById(controlId), [controlId]);
 
@@ -117,6 +122,7 @@ export default function App() {
         theme="field-notes"
         family="cut-stone"
         appearance={appearance}
+        names={screen.names}
         onExit={goHome}
         onRematch={(swapSides) =>
           setScreen((current) =>
@@ -141,11 +147,18 @@ export default function App() {
     // keeps the sides it was actually played with and "Swap sides" means
     // something definite.
     const humanSide: Side = sideChoice === 'random' ? (Math.random() < 0.5 ? 'blue' : 'red') : sideChoice;
+    // Names are pass-and-play's own thing (there's no "your side" to name
+    // against a computer) — a blank field just falls back to Blue/Red.
+    const names: SideNames =
+      mode === 'pass-and-play'
+        ? { ...(blueName.trim() && { blue: blueName.trim() }), ...(redName.trim() && { red: redName.trim() }) }
+        : {};
     setScreen({
       name: 'game',
       variant: selected,
       computer: mode === 'vs-computer' ? { side: other(humanSide), level } : null,
       round: 0,
+      names,
     });
   };
 
@@ -191,6 +204,34 @@ export default function App() {
           </button>
         ))}
       </div>
+
+      {mode === 'pass-and-play' && (
+        // Optional — a blank field is Blue/Red, same as before this existed.
+        // Pass-and-play only: vs-computer already has "You" (GameOver.tsx)
+        // and the computer doesn't need a name of its own.
+        <div className="name-fields">
+          <label className="time-control">
+            Blue's name
+            <input
+              type="text"
+              value={blueName}
+              onChange={(event) => setBlueName(event.target.value)}
+              placeholder="Blue"
+              maxLength={24}
+            />
+          </label>
+          <label className="time-control">
+            Red's name
+            <input
+              type="text"
+              value={redName}
+              onChange={(event) => setRedName(event.target.value)}
+              placeholder="Red"
+              maxLength={24}
+            />
+          </label>
+        </div>
+      )}
 
       {mode === 'vs-computer' && (
         <>

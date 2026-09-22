@@ -12,6 +12,8 @@
 // resuming an in-progress game. A streak counter that resets every reload
 // would be worse than none.
 
+import { sideName } from '@sps/board';
+import type { SideNames } from '@sps/board';
 import type { GameResult, GameSummary, Side } from '@sps/engine';
 import { describeExtinction, describeResult, fullMoveOf } from './announce.js';
 
@@ -20,6 +22,8 @@ export interface GameOverProps {
   summary: GameSummary;
   /** null in pass-and-play, where there is no "your side" to swap. */
   humanSide: Side | null;
+  /** Pass-and-play's optional player names — see Game's own `names` prop. */
+  names?: SideNames;
   onRematch: () => void;
   onSwapSides: (() => void) | null;
   onReview: () => void;
@@ -28,14 +32,11 @@ export interface GameOverProps {
   copyNote: string | null;
 }
 
-function sideLabel(side: Side): string {
-  return side === 'blue' ? 'Blue' : 'Red';
-}
-
 export default function GameOver({
   result,
   summary,
   humanSide,
+  names,
   onRematch,
   onSwapSides,
   onReview,
@@ -53,7 +54,7 @@ export default function GameOver({
   return (
     <div className="game-over" role="dialog" aria-label="Game over">
       {headline && <p className="game-over-result">{headline}</p>}
-      <p className={headline ? 'game-over-reason' : 'game-over-result'}>{describeResult(result)}</p>
+      <p className={headline ? 'game-over-reason' : 'game-over-result'}>{describeResult(result, names)}</p>
 
       <dl className="game-over-facts">
         <div>
@@ -61,11 +62,11 @@ export default function GameOver({
           <dd>{fullMoveOf(summary.plies)}</dd>
         </div>
         <div>
-          <dt>Blue took</dt>
+          <dt>{sideName('blue', names)} took</dt>
           <dd>{summary.captures.blue}</dd>
         </div>
         <div>
-          <dt>Red took</dt>
+          <dt>{sideName('red', names)} took</dt>
           <dd>{summary.captures.red}</dd>
         </div>
         {summary.neutralCaptures > 0 && (
@@ -78,7 +79,7 @@ export default function GameOver({
 
       {summary.extinctions.length > 0 && (
         <p className="game-over-extinct">
-          Wiped out: {summary.extinctions.map(describeExtinction).join(' · ')}
+          Wiped out: {summary.extinctions.map((extinction) => describeExtinction(extinction, names)).join(' · ')}
         </p>
       )}
 
@@ -100,7 +101,7 @@ export default function GameOver({
       </div>
 
       {humanSide && onSwapSides && (
-        <p className="game-over-note">You played {sideLabel(humanSide)}.</p>
+        <p className="game-over-note">You played {sideName(humanSide, names)}.</p>
       )}
       {copyNote && <p className="game-over-note" role="status">{copyNote}</p>}
     </div>

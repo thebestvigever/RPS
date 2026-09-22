@@ -48,7 +48,8 @@ export { PIECE_MOTION_CLASS, renderBoard, renderPieceSample } from './render.js'
 export type { MotionKind } from './motion.js';
 export { captureMotion, MOTION_MS } from './motion.js';
 
-export { pieceTypeName, illegalCaptureReason } from './text.js';
+export type { SideNames } from './text.js';
+export { pieceTypeName, sideName, illegalCaptureReason, neutralSelectionText } from './text.js';
 
 export { RenderError, FamilyNotBuiltError } from './errors.js';
 

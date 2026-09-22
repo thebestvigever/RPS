@@ -85,7 +85,8 @@ h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
   font-size: 0.9rem;
   margin-top: 0.5rem;
 }
-.time-control select {
+.time-control select,
+.time-control input[type='text'] {
   font: inherit;
   padding: 0.3rem 0.5rem;
   border-radius: 6px;
@@ -93,6 +94,9 @@ h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
   background: var(--paper);
   color: var(--ink);
 }
+.time-control input[type='text'] { width: 10rem; max-width: 50%; }
+
+.name-fields { display: flex; flex-direction: column; gap: 0.25rem; }
 
 .mode-picker {
   display: flex;

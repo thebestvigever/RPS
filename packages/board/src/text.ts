@@ -5,7 +5,8 @@
 // same way moveToText's grammar is — an app that speaks a different language
 // still wants these strings.
 
-import type { PieceType } from '@sps/engine';
+import { beats } from '@sps/engine';
+import type { PieceType, Side } from '@sps/engine';
 
 const DISPLAY_NAME: Record<PieceType, string> = {
   rock: 'Rock',
@@ -15,6 +16,32 @@ const DISPLAY_NAME: Record<PieceType, string> = {
 
 export function pieceTypeName(type: PieceType): string {
   return DISPLAY_NAME[type];
+}
+
+const SIDE_NAME: Record<Side, string> = { blue: 'Blue', red: 'Red' };
+
+/** Pass-and-play's optional player names (App's name fields), keyed by side. A missing or blank entry falls back to the colour name. */
+export type SideNames = Partial<Record<Side, string>>;
+
+export function sideName(side: Side, names?: SideNames): string {
+  return names?.[side]?.trim() || SIDE_NAME[side];
+}
+
+/**
+ * Spec 10.4: selecting a neutral piece explains itself in the status line —
+ * either the capture it's lined up (its type beats exactly one other, so the
+ * victim's type is never ambiguous) or why nothing happened. `hasCapture`
+ * comes from the legal-move list already computed for the turn, not
+ * recomputed here — this is wording, not rules.
+ */
+export function neutralSelectionText(
+  type: PieceType,
+  opponentSide: Side,
+  hasCapture: boolean,
+  names?: SideNames,
+): string {
+  if (!hasCapture) return 'Neutrals only move to capture';
+  return `Using the neutral ${pieceTypeName(type)} — capture a ${sideName(opponentSide, names)} ${pieceTypeName(beats(type))}`;
 }
 
 /**

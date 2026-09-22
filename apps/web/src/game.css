@@ -56,7 +56,18 @@
    reads toward it: name outermost, clock innermost. */
 .panel--opponent { flex-direction: row-reverse; }
 
-.panel-name { display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 600; }
+.panel-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+  /* A custom pass-and-play name can run long; the dot must stay put and the
+     text should clip rather than push the counts off the board's edge. */
+  min-width: 0;
+  overflow: hidden;
+}
+.panel-dot { flex: none; }
+.panel-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .panel-dot {
   width: 0.6rem;
   height: 0.6rem;
@@ -172,6 +183,16 @@
   pointer-events: none;
 }
 
+/* Neutral capture-available pulse — spec 10.4: "a subtle pulse". Respects the
+   global prefers-reduced-motion override in styles.css. */
+@keyframes neutral-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+.board-wrap [data-square].neutral-pulse > .piece-motion {
+  animation: neutral-pulse 1400ms ease-in-out infinite;
+}
+
 /* M3c — clocks, offers, abort, rematch (docs/VISUAL_SYSTEM.md 8). */
 
 .clock-chip {
@@ -213,13 +234,28 @@
   font-size: 0.9rem;
 }
 .offer-banner p { margin: 0; flex: 1; }
+/* `color` is not optional here. Without it these inherit the user agent's
+   button colour — near-black — which sits on `--paper`, and `--paper` is
+   #16181c in dark mode. The result was dark grey text on a dark panel, well
+   under WCAG AA (spec 10.10). Every other button in this file already sets
+   it; this one was the outlier. */
 .offer-banner button {
   border: 1px solid var(--grid);
   background: var(--paper);
+  color: var(--ink);
+  font: inherit;
   border-radius: 6px;
-  padding: 0.25rem 0.6rem;
+  padding: 0.3rem 0.7rem;
   cursor: pointer;
 }
+.offer-banner button:hover { background: var(--square-alt); }
+.offer-banner button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+/* No emphasised Accept yet: giving it a blue FILL would put white on
+   `--blue`, and dark mode's `--blue` is a light blue — 2.52:1, a fresh AA
+   failure replacing the one just fixed. Blue text on `--paper` is the version
+   that passes both themes (7.05:1 dark, 4.73:1 light) and needs a class on
+   the button in Game.tsx, so it waits for that file to be free. */
 
 
 /* Move list — spec 10.8, in a drawer on a phone (spec 10.11). `<details>`

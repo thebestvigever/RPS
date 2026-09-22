@@ -16,11 +16,65 @@ the previous milestone's "done when" holds.**
 | C2 | Premove, abort, low-time warning, Zen | Logic green; rendering waits on M3 | **done; abort and low-time rendered (M3c) — premove and Zen wait on M4/M6** |
 | M4 | Play against the computer: worker, three levels, undo | Hard stays inside its time budget on a phone | **done** |
 | M4b | Board orientation, and the four cuts it was blocking: side picker, corner-anchored panels, move list + game-over overlay, Undo's clock refund | Playable as Red; §10.7's four buttons all work; Undo puts both clocks back | **done** |
-| M5 | 2×2 Corner and Neutrals, and the variant picker | All three variants playable both ways | |
+| M5 | 2×2 Corner and Neutrals, and the variant picker | All three variants playable both ways | **done** |
 | M6 | Information aids (§10.5) | Each aid on and off, correct in the fixture positions | |
 | M7 | How to play and the tutorial | A new player finishes all six puzzles | |
 | M8 | Sound, animation, accessibility, persistence; the clock's replay in review | §11.6 passes | review and share links landed early with M4b |
 | M9 | Release | §11.7 fully ticked; deployed | |
+
+## What M5 left behind
+
+Most of M5 was already paid for by "variants are data" (CLAUDE.md). The engine
+has generated legal moves, sealed corners and terminal results for all three
+variants since M1 — the perft table in "What M1 left behind" below already
+covers 2×2 Corner and Neutrals — and `apps/web`'s variant picker played either
+one the moment it existed, because `Game.tsx` never had an Original-specific
+branch to begin with: it plays whatever `legalMoves()` returns. `cornerTintLayer`
+generalised to a four-square goal block for free too, since it already looped
+over `homeSquares(variant, side)` rather than assuming one square each.
+
+**What M5 actually had to build: the two neutral-specific interactions spec
+10.4 describes, which Original never exercises.**
+
+* **The capture-available pulse.** A neutral with a capture on offer gets the
+  `neutral-pulse` class from `renderBoard`'s new `pulseSquares` option —
+  computed once from `legalMoves`, the same list `isSelectable` already reads,
+  so it needs no separate "whose turn" check. CSS drives the animation (a 1.4s
+  opacity fade, same `prefers-reduced-motion` override every other animation in
+  `game.css` already respects); `@sps/board` only says which square gets it.
+* **The two status lines.** Tapping a neutral now reads "Using the neutral
+  Paper — capture a Red Rock" or "Neutrals only move to capture" (spec 10.4,
+  verbatim). Both live in `packages/board/src/text.ts` beside
+  `illegalCaptureReason` — rules-derived wording, not app wiring — and the
+  second one needed its own branch in `resolveClick`: a neutral with nothing to
+  capture has no legal move, so it never passes `isSelectable`, and without an
+  explicit fallback the tap did nothing at all rather than explaining why.
+* **The neutral's own victim overlay.** M3b/M4b's capture animation skipped a
+  neutral victim outright — `renderPieceSample` only knew "yours" or
+  "opponent," not a neutral's dashed ring, so drawing one wrong was worse than
+  not drawing it, and the comment above the code said M5 owned the fix. It now
+  takes an `isNeutral` option that routes to the same `neutralPiece` drawing
+  `piecesLayer` already uses everywhere else, coloured from the theme's own
+  `neutral` token instead of a side colour that a neutral piece doesn't have.
+
+**Verified by actually playing it, not just typechecking it.** The five-ply
+line that reaches a neutral capture from the Neutrals opening
+(`Pb5-a6 Pe8-d9 Pa6-a7 Pf7-e6 nSe5xe6`) came from a short engine search, not a
+hand trace — the same reasoning M3b's capture bug and M4's worker exchange were
+both caught by. Played through real clicks in pass-and-play: the pulse landed
+on `e5` the instant it became Blue's move, selecting it produced the exact
+"Using the neutral Scissors — capture a Red Paper" line, and completing it
+updated Red's Paper count, moved the neutral itself onto `e6`, and announced
+"Using the neutral Scissors to capture Red Paper on e6" with zero console
+errors. 2×2 Corner's four-square tint was checked visually at game start, and
+both variants were sanity-played a move each against the real computer (not a
+stub) with no errors either.
+
+**Not separately re-verified: playing a 2×2 Corner game through to an actual
+win in the browser.** Landing on any of the four goal squares is engine logic
+untouched by M5 — it was already in M1's perft and fixture vectors — and
+`GameOver`/`describeResult` key off `result.reason` strings, never a specific
+square, so nothing about winning differently needed new UI code to render.
 
 ## What C1 left behind
 

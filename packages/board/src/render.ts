@@ -99,6 +99,8 @@ export interface RenderOptions {
   selection?: Selection | null;
   /** The keyboard focus cursor (spec 10.4/10.10) — a visible ring distinct from selection's. */
   focusSquare?: Square | null;
+  /** Neutral pieces with a capture on offer this turn — spec 10.4's "subtle pulse". CSS drives the animation; this only says which squares get the class. */
+  pulseSquares?: readonly Square[];
   /** Whose corner sits bottom-left (spec 10.2). Defaults to Blue's. */
   orientation?: Orientation;
 }
@@ -115,6 +117,7 @@ export function renderBoard(options: RenderOptions): string {
     lastMove = null,
     selection = null,
     focusSquare = null,
+    pulseSquares = [],
     orientation = DEFAULT_ORIENTATION,
   } = options;
 
@@ -141,6 +144,7 @@ export function renderBoard(options: RenderOptions): string {
       themeTokens.neutral,
       squarePx,
       orientation,
+      new Set(pulseSquares),
     ),
     coordinates
       ? coordinatesLayer(boardPx, squarePx, themeTokens.muted, themeTokens.fonts.mono, orientation)
@@ -451,6 +455,7 @@ function piecesLayer(
   neutralColor: string,
   squarePx: number,
   orientation: Orientation,
+  pulseSquares: ReadonlySet<Square>,
 ): string {
   const pieces: string[] = [];
   for (let square = 0; square < board.length; square++) {
@@ -474,7 +479,11 @@ function piecesLayer(
     pieces.push(
       group(
         'g',
-        { transform: `translate(${round(x)},${round(y)})`, 'data-square': square },
+        {
+          transform: `translate(${round(x)},${round(y)})`,
+          'data-square': square,
+          class: pulseSquares.has(square) ? 'neutral-pulse' : undefined,
+        },
         group('g', { class: PIECE_MOTION_CLASS, style: 'transform-box: fill-box; transform-origin: center' }, markup),
       ),
     );
@@ -604,18 +613,23 @@ export interface PieceSampleOptions {
   color: string;
   squareColor: string;
   isOpponent: boolean;
+  /** A neutral piece (Neutrals variant) — drawn with `neutralPiece`'s dashed ring, `mode`/`isOpponent` ignored, same as `piecesLayer`. */
+  isNeutral?: boolean;
 }
 
 /**
  * One piece, alone on a square-coloured background — the same drawing
  * `renderBoard` uses, without a whole board around it. Used by the M3a
  * greyscale review sheet (test/greyscale-review.test.ts, docs/VISUAL_SYSTEM.md
- * 9) and reusable later for an appearance picker's family/theme previews.
+ * 9), the victim overlay for a captured neutral (M5), and reusable later for
+ * an appearance picker's family/theme previews.
  */
 export function renderPieceSample(options: PieceSampleOptions): string {
-  const { type, family: familyId, mode, squarePx, color, squareColor, isOpponent } = options;
+  const { type, family: familyId, mode, squarePx, color, squareColor, isOpponent, isNeutral = false } = options;
   const family = familyMark(familyId);
-  const piece = sidePiece(type, family, mode, color, isOpponent, squareColor, squarePx);
+  const piece = isNeutral
+    ? neutralPiece(type, family, color, squarePx)
+    : sidePiece(type, family, mode, color, isOpponent, squareColor, squarePx);
   const background = el('rect', { x: 0, y: 0, width: round(squarePx), height: round(squarePx), fill: squareColor });
 
   return group(
