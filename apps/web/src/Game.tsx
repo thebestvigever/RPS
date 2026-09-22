@@ -18,12 +18,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  SHARE_PREFIX,
   abortGame,
   agreeDraw,
   applyMove,
-  createGame,
   decodePiece,
   distance,
+  encodeRecord,
   flag as engineFlag,
   legalMoves,
   moveToText,
@@ -31,26 +32,29 @@ import {
   parseMove,
   replay,
   resign as engineResign,
+  summarise,
   toFen,
   typeCounts,
 } from '@sps/engine';
-import type { GameRecord, GameState, Move, PieceType, Side, Square, VariantConfig } from '@sps/engine';
+import type { GameRecord, GameResult, GameState, Move, PieceType, Side, Square, VariantConfig } from '@sps/engine';
 import {
   MOTION_MS,
   THEMES,
   captureMotion,
   illegalCaptureReason,
+  displayCell,
   pieceTypeName,
   renderBoard,
   renderPieceSample,
 } from '@sps/board';
-import type { Appearance, FamilyId, MotionKind, ThemeId } from '@sps/board';
+import type { Appearance, FamilyId, MotionKind, Orientation, ThemeId } from '@sps/board';
 import {
   GIFT_POLICIES,
   OFFER_POLICIES,
   canAbort,
   canGive,
   canOffer,
+  clockRecord,
   createClock,
   createOffers,
   flaggedAt,
@@ -61,6 +65,7 @@ import {
   onMove as offersOnMove,
   press as pressClock,
   remainingAt,
+  rewind,
   startTurn,
   stop as stopClock,
   urgencyOf,
@@ -69,9 +74,11 @@ import type { ClockState, MatchMode, OfferState, TimeControl, Urgency } from '@s
 import { shouldAcceptDraw } from '@sps/ai';
 import type { FromWorker, Level, ToWorker } from '@sps/ai';
 import { clampSquare, slideOffsetPx, squareAt } from './board-geometry.js';
-import { describeResult, describeTurn, whoseTurn } from './announce.js';
+import { describeResult, describeTurn, fullMoveOf, whoseTurn } from './announce.js';
 import { formatClock } from './clock-format.js';
 import { createAiWorker } from './ai-worker.js';
+import MoveList from './MoveList.js';
+import GameOver from './GameOver.js';
 import './game.css';
 
 export interface Computer {
@@ -86,13 +93,30 @@ function randomSeed(): number {
 export interface GameProps {
   variant: VariantConfig;
   control: TimeControl;
-  /** null for pass-and-play. Set, this side is the computer's — always Red for
-   * now (see the note above `humanSide` below for why). */
+  /** null for pass-and-play. Set, this side is the computer's. */
   computer: Computer | null;
   theme: ThemeId;
   family: FamilyId;
   appearance: Appearance;
   onExit: () => void;
+  /**
+   * Rematch and Swap sides (spec 10.7). Handled by the caller rather than in
+   * here, because swapping changes which side the computer is — a prop — and
+   * because remounting is a more honest reset than clearing a dozen pieces of
+   * state by hand: that list silently rots every time new state is added, and
+   * a rematch that quietly kept the old clock stack would be exactly that bug.
+   */
+  onRematch: (swapSides: boolean) => void;
+  /** A game to open already played out — a shared link (spec 8.4), read-only. */
+  initialMoves?: readonly string[];
+  /**
+   * How that game ended. It cannot be replayed from the moves — a resignation
+   * leaves no trace in them — so without it a shared game that somebody
+   * resigned would open looking like an ongoing position waiting for a move.
+   */
+  initialResult?: GameResult | null;
+  /** Spec 10.1's Review screen: a finished or shared game, nothing playable. */
+  reviewOnly?: boolean;
 }
 
 function useBoardPx(): number {
@@ -106,6 +130,17 @@ function useBoardPx(): number {
     return () => window.removeEventListener('resize', onResize);
   }, []);
   return px;
+}
+
+/**
+ * Spec 10.11: on a phone the move list "lives in a drawer"; a desktop has room
+ * to leave it open. Read once, at mount — this decides an initial `<details
+ * open>` and nothing else, so re-deciding it on every resize would fight a
+ * player who had just closed it.
+ */
+function useWideEnoughForList(): boolean {
+  const [wide] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 700);
+  return wide;
 }
 
 function usePrefersReducedMotion(): boolean {
@@ -178,43 +213,125 @@ function victimKeyframes(motion: MotionKind): Keyframe[] {
   return [{ opacity: 1 }, { opacity: 0 }]; // wrap: fades under the captor
 }
 
-export default function Game({ variant, control, computer, theme, family, appearance, onExit }: GameProps) {
+export default function Game({
+  variant,
+  control,
+  computer,
+  theme,
+  family,
+  appearance,
+  onExit,
+  onRematch,
+  initialMoves,
+  initialResult = null,
+  reviewOnly = false,
+}: GameProps) {
   const boardPx = useBoardPx();
   const squarePx = boardPx / 9;
   const reducedMotion = usePrefersReducedMotion();
+  const wideEnoughForList = useWideEnoughForList();
   const containerRef = useRef<HTMLDivElement>(null);
   const dragOriginRef = useRef<Square | null>(null);
   const workerRef = useRef<Worker | null>(null);
 
   const mode: MatchMode = computer ? 'vs-computer' : 'pass-and-play';
-  // Always Red for now: spec 10.2 rotates the board 180 degrees for a human
-  // playing Red, and no @sps/board release yet does board orientation (M3b's
-  // own documented cut). Letting the human choose Red before that exists
-  // would show their own pieces starting at the far corner — worse than not
-  // offering the choice. Home's side picker arrives with orientation.
   const humanSide: Side = computer ? other(computer.side) : 'blue';
 
-  const [history, setHistory] = useState<string[]>([]);
-  const [gameState, setGameState] = useState<GameState>(() => createGame(variant));
+  // Spec 10.2: "your own corner sits bottom-left. Playing Red against the
+  // computer rotates the board 180°." Pass-and-play keeps one orientation
+  // (its optional flip-each-turn setting is Settings work, and off by
+  // default), which `humanSide` already gives as Blue — so this is one
+  // expression rather than a branch on mode.
+  const orientation: Orientation = humanSide;
+
+  // The ownership cue follows the same person the orientation does. These are
+  // two inputs to the renderer on purpose (see `Appearance.viewerSide`), but
+  // this app sets them together: whoever is looking gets their own corner
+  // bottom-left AND their own pieces as filled discs.
+  const view = useMemo<Appearance>(() => ({ ...appearance, viewerSide: humanSide }), [appearance, humanSide]);
+
+  // A game that arrives already played — a shared link (spec 8.4). Both of
+  // these are first-render values only; `useMemo` is here so the state below
+  // starts from ONE object rather than two that were built a millisecond
+  // apart. A rematch or a new link arrives as a remount, not as a prop change.
+  const opening = useMemo(() => replay(variant, [...(initialMoves ?? [])]), [variant, initialMoves]);
+  // A review's clock is never started. It has nothing to measure — the game
+  // is already played — and a running one would tick a finished game down to
+  // a flag, inventing a result nobody played for.
+  const initialClock = useMemo(
+    () => (reviewOnly ? createClock(control) : startTurn(createClock(control), 'blue', Date.now())),
+    [control, reviewOnly],
+  );
+
+  const [history, setHistory] = useState<string[]>(() => [...(initialMoves ?? [])]);
+  const [gameState, setGameState] = useState<GameState>(opening.state);
   const [selected, setSelected] = useState<Square | null>(null);
   const [focus, setFocus] = useState<Square>(0);
-  const [status, setStatus] = useState<string>(() => whoseTurn(gameState.turn));
+  const [status, setStatus] = useState<string>(() =>
+    initialResult ? describeResult(initialResult) : whoseTurn(opening.state.turn),
+  );
   const [lastMove, setLastMove] = useState<{ from: Square; to: Square } | null>(null);
   const [anim, setAnim] = useState<PendingAnim | null>(null);
-  const [clock, setClock] = useState<ClockState>(() => startTurn(createClock(control), 'blue', Date.now()));
+  const [clock, setClock] = useState<ClockState>(initialClock);
   const [offers, setOffers] = useState<OfferState>(() => createOffers(OFFER_POLICIES[mode]));
   const [now, setNow] = useState(() => Date.now());
   const [thinking, setThinking] = useState(false);
+  const [copyNote, setCopyNote] = useState<string | null>(null);
+
+  /**
+   * The clock as it stood at each ply: `clockStack[n]` is the clock with n
+   * moves played, so it is always one longer than `history`.
+   *
+   * This is what makes Undo refund time (spec 10.8) instead of resuming
+   * wherever the clock happened to be — and it is the same per-move
+   * `remainingMs` spec 8.3's record carries, which is why Copy link can tell
+   * the truth about a timed game rather than shipping a link that quietly
+   * drops the clock.
+   */
+  const [clockStack, setClockStack] = useState<ClockState[]>(() => [initialClock]);
+
+  /**
+   * How many plies the board is showing — null for the live position.
+   *
+   * One piece of state covers both of spec 10.8's readers: tapping a move in
+   * the list, and Review's own stepper. A shared link is just a game that
+   * opens with this already set.
+   */
+  const [viewPly, setViewPly] = useState<number | null>(reviewOnly ? 0 : null);
+  const reviewing = viewPly !== null;
 
   const legal = useMemo(() => legalMoves(gameState), [gameState]);
-  const fen = useMemo(() => toFen(gameState), [gameState]);
   const counts = useMemo(() => typeCounts(gameState), [gameState]);
   const gameOver = gameState.result != null;
   const humanTurn = gameState.turn === humanSide;
 
+  /**
+   * What the BOARD shows, which is the live game until somebody steps back
+   * through it. Replaying rather than keeping a stack of positions is the
+   * cheap, correct option: the move list is the source of truth (CLAUDE.md),
+   * and a 140-ply replay is well under a frame.
+   */
+  const viewState = useMemo(
+    () => (viewPly === null ? gameState : replay(variant, history.slice(0, viewPly)).state),
+    [viewPly, gameState, variant, history],
+  );
+  const fen = useMemo(() => toFen(viewState), [viewState]);
+
+  /** While reviewing, the highlight belongs to the move being looked at. */
+  const shownLastMove = useMemo(() => {
+    if (viewPly === null) return lastMove;
+    if (viewPly === 0) return null;
+    const { events } = replay(variant, history.slice(0, viewPly));
+    const moveEvent = events
+      .at(-1)
+      ?.find((event): event is Extract<typeof event, { type: 'move' }> => event.type === 'move');
+    return moveEvent ? { from: moveEvent.from, to: moveEvent.to } : null;
+  }, [viewPly, lastMove, variant, history]);
+
+  /** Reviewing is read-only (spec 10.8), so nothing on the board is pickable. */
   const isSelectable = useCallback(
-    (square: Square) => humanTurn && legal.some((m) => m.from === square),
-    [legal, humanTurn],
+    (square: Square) => humanTurn && !reviewing && legal.some((m) => m.from === square),
+    [legal, humanTurn, reviewing],
   );
 
   const selection = useMemo(() => {
@@ -235,18 +352,28 @@ export default function Game({ variant, control, computer, theme, family, appear
         boardPx,
         theme,
         family,
-        appearance,
-        lastMove,
+        appearance: view,
+        orientation,
+        lastMove: shownLastMove,
         selection,
-        focusSquare: focus,
+        // No cursor over a position that cannot be played — its dashed ring
+        // would promise an input that does nothing.
+        focusSquare: reviewing ? null : focus,
       }),
-    [fen, variant, boardPx, theme, family, appearance, lastMove, selection, focus],
+    [fen, variant, boardPx, theme, family, view, orientation, shownLastMove, selection, focus, reviewing],
   );
 
   const doMove = useCallback(
     (move: Move) => {
       const applied = applyMove(gameState, move);
       const text = moveToText(gameState, move);
+      const at = Date.now();
+      // Pressed once, here, and then both stored and stacked — rather than
+      // computed inside each setter, which would press the clock twice and
+      // bank two different times for the one move.
+      const pressed = pressClock(clock, at);
+      const next = applied.state.result ? stopClock(pressed, at) : pressed;
+
       setHistory((h) => [...h, text]);
       setGameState(applied.state);
       setLastMove({ from: move.from, to: move.to });
@@ -257,12 +384,10 @@ export default function Game({ variant, control, computer, theme, family, appear
       // Moving answers a pending draw offer by playing on — declined (offers.ts's
       // own rule; a rematch offer is exempt, but nothing pends one mid-game).
       setOffers((o) => offersOnMove(o));
-      setClock((c) => {
-        const pressed = pressClock(c, Date.now());
-        return applied.state.result ? stopClock(pressed, Date.now()) : pressed;
-      });
+      setClock(next);
+      setClockStack((stack) => [...stack, next]);
     },
-    [gameState],
+    [gameState, clock],
   );
 
   /** The shared core of a tap-elsewhere and a drag-release: what happens when
@@ -332,24 +457,24 @@ export default function Game({ variant, control, computer, theme, family, appear
   // gesture is what removes the race, not a special case for it.
   const onPointerDown = useCallback(
     (event: React.PointerEvent) => {
-      if (gameOver) return;
+      if (gameOver || reviewing) return;
       const rect = rectFor();
       if (!rect) return;
-      const square = squareAt(rect, event.clientX, event.clientY);
+      const square = squareAt(rect, event.clientX, event.clientY, orientation);
       if (square == null) return;
       dragOriginRef.current = square;
     },
-    [gameOver, rectFor],
+    [gameOver, reviewing, rectFor, orientation],
   );
 
   const onPointerUp = useCallback(
     (event: React.PointerEvent) => {
       const origin = dragOriginRef.current;
       dragOriginRef.current = null;
-      if (gameOver || origin == null) return;
+      if (gameOver || reviewing || origin == null) return;
       const rect = rectFor();
       if (!rect) return;
-      const square = squareAt(rect, event.clientX, event.clientY);
+      const square = squareAt(rect, event.clientX, event.clientY, orientation);
       if (square == null) return;
 
       if (square === origin) {
@@ -366,14 +491,44 @@ export default function Game({ variant, control, computer, theme, family, appear
         resolveDestination(origin, square);
       }
     },
-    [gameOver, rectFor, selected, isSelectable, resolveClick, resolveDestination],
+    [gameOver, reviewing, rectFor, orientation, selected, isSelectable, resolveClick, resolveDestination],
   );
 
   // --- Keyboard: arrow keys move the cursor; Enter/Space is exactly a tap on
   // it (spec 10.4) — reusing resolveClick is what makes this a complete input
   // method rather than a second, easily-diverging implementation.
+  //
+  // In review the same arrows step through the game instead (spec 10.8).
+  // That is not a clash: reviewing has no cursor to move and nothing to
+  // select, so the two readings of an arrow key never both apply.
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
+      if (reviewing) {
+        const steps: Record<string, number> = { ArrowLeft: -1, ArrowRight: 1 };
+        const step = steps[event.key];
+        if (step !== undefined) {
+          event.preventDefault();
+          setViewPly((ply) => Math.min(history.length, Math.max(0, (ply ?? 0) + step)));
+          return;
+        }
+        if (event.key === 'Home') {
+          event.preventDefault();
+          setViewPly(0);
+          return;
+        }
+        if (event.key === 'End') {
+          event.preventDefault();
+          setViewPly(history.length);
+          return;
+        }
+        if (event.key === 'Escape' && !reviewOnly) {
+          event.preventDefault();
+          setViewPly(null); // back to the live game
+          return;
+        }
+        return;
+      }
+
       const arrows: Record<string, [number, number]> = {
         ArrowUp: [-1, 0],
         ArrowDown: [1, 0],
@@ -383,7 +538,9 @@ export default function Game({ variant, control, computer, theme, family, appear
       const delta = arrows[event.key];
       if (delta) {
         event.preventDefault();
-        setFocus((f) => clampSquare(f, delta[0], delta[1]));
+        // Screen directions, not board ones — the cursor follows the arrow a
+        // player actually pressed, whichever way round the board is.
+        setFocus((f) => clampSquare(f, delta[0], delta[1], orientation));
         return;
       }
       if (event.key === 'Enter' || event.key === ' ') {
@@ -401,18 +558,19 @@ export default function Game({ variant, control, computer, theme, family, appear
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [focus, resolveClick],
+    [focus, resolveClick, reviewing, reviewOnly, history.length, orientation],
   );
 
   function undo() {
-    if (history.length === 0 || gameOver) return;
+    if (history.length === 0 || gameOver || reviewing) return;
     // Against the computer, Undo takes back your move AND its reply — two
     // plies (spec 10.8) — so you land back on your own turn, not its.
     // Exactly one ply is available while the reply hasn't arrived yet
     // (`thinking`): only your move exists to take back, and the effect
     // above cancels the in-flight think as soon as `history` changes.
     const plies = computer && !thinking && history.length >= 2 ? 2 : 1;
-    const nextHistory = history.slice(0, -plies);
+    const target = history.length - plies;
+    const nextHistory = history.slice(0, target);
     const replayed = replay(variant, nextHistory);
     setHistory(nextHistory);
     setGameState(replayed.state);
@@ -423,11 +581,22 @@ export default function Game({ variant, control, computer, theme, family, appear
     const moveEvent = lastEvents?.find((e): e is Extract<typeof e, { type: 'move' }> => e.type === 'move');
     setLastMove(moveEvent ? { from: moveEvent.from, to: moveEvent.to } : null);
     setStatus(whoseTurn(replayed.state.turn));
-    // The clock resumes for whoever moves next, at whatever it currently
-    // reads. It does NOT refund the undone move's time — replaying that
-    // accurately needs the per-move remainingMs the record carries (spec
-    // 8.3), which is persistence (M8), not this milestone.
-    setClock((c) => startTurn(c, replayed.state.turn, Date.now()));
+
+    // The clock goes back to what it read when that position was first
+    // reached — both sides, and the stage each was in, not just the player
+    // who pressed Undo. `rewind` is the pure part and knows nothing about
+    // the time of day; `startTurn` re-anchors it to now and hands the turn
+    // to whoever is to move.
+    //
+    // Gifts made before that point survive, because they are in the snapshot.
+    // One made during an undone turn does not, which is the honest reading:
+    // it was given in a part of the game that no longer happened. Nothing is
+    // farmable either way — a self-gift is already unlimited against the
+    // computer (gifts.ts: "there is nobody to cheat"), and in pass-and-play
+    // a gift only ever helps the opponent.
+    const restored = rewind(clockStack, target);
+    setClockStack(clockStack.slice(0, target + 1));
+    setClock(startTurn(restored, replayed.state.turn, Date.now()));
   }
 
   function doResign() {
@@ -494,26 +663,57 @@ export default function Game({ variant, control, computer, theme, family, appear
     setClock((c) => giveTime(c, { ply: gameState.ply, from, to, ms: GIFT_POLICIES[mode].ms }));
   }
 
-  function doRematch() {
-    // One click, not an offer/accept pair: both players (or the one player
-    // and the computer) are already right here, so there is nothing to
-    // negotiate the way a mid-game draw does — offers.ts's 'rematch' kind is
-    // for a mode where the two sides aren't already agreeing in person
-    // (M5+'s online play).
-    //
-    // Not "sides swapped" (spec 10.7's other rematch button) even now that
-    // vs-computer exists: swapping needs board orientation (M3b's documented
-    // cut — a Red-playing human needs the board rotated, spec 10.2), which
-    // still doesn't exist. The computer stays whichever side it started as.
-    setHistory([]);
-    setGameState(createGame(variant));
-    setSelected(null);
-    setAnim(null);
-    setLastMove(null);
-    setOffers(createOffers(OFFER_POLICIES[mode]));
-    setClock(startTurn(createClock(control), 'blue', Date.now()));
-    setStatus(whoseTurn('blue'));
-    setThinking(false);
+  /**
+   * One click, not an offer/accept pair: both players (or the one player and
+   * the computer) are already right here, so there is nothing to negotiate
+   * the way a mid-game draw does — offers.ts's 'rematch' kind is for a mode
+   * where the two sides aren't already agreeing in person (M5+'s online play).
+   *
+   * "Sides swapped" (spec 10.7) is now a real option rather than a deferred
+   * one, because the board can be turned around. It is the caller's call to
+   * make: which side the computer plays is a prop, and a fresh mount is a
+   * more trustworthy reset than clearing each piece of state by hand.
+   */
+  function rematch(swapSides: boolean) {
+    onRematch(swapSides);
+  }
+
+  /** Spec 8.4's shareable link — the record, minus players and seed, in the URL. */
+  function shareLink(): string {
+    const clock = clockRecord(clockStack);
+    const record: GameRecord = {
+      game: 'stone-paper-scissors',
+      rulesVersion: 1,
+      variant: variant.id,
+      start: variant.start,
+      moves: history,
+      ...(gameState.result ? { result: gameState.result } : {}),
+      // The clock section is what stops a shared game hiding that somebody
+      // handed themselves ten extra minutes (spec 8.3's own note on it).
+      ...(clock ? { clock } : {}),
+    };
+    const { origin, pathname } = window.location;
+    return `${origin}${pathname}${SHARE_PREFIX}${encodeRecord(record)}`;
+  }
+
+  function copyLink() {
+    const link = shareLink();
+    // The clipboard is not always there to write to — an insecure origin, or
+    // a browser that wants a user gesture it did not see. Putting the link in
+    // the address bar as a fallback means the player can still copy it by
+    // hand, which beats a button that silently did nothing.
+    if (!navigator.clipboard) {
+      window.location.hash = link.slice(link.indexOf('#') + 1);
+      setCopyNote('Copy it from the address bar — this browser will not copy for the page.');
+      return;
+    }
+    void navigator.clipboard
+      .writeText(link)
+      .then(() => setCopyNote('Link copied.'))
+      .catch(() => {
+        window.location.hash = link.slice(link.indexOf('#') + 1);
+        setCopyNote('Copy it from the address bar — the clipboard refused.');
+      });
   }
 
   // --- The clock: ticks `now` for a live display, and is the one place that
@@ -523,7 +723,7 @@ export default function Game({ variant, control, computer, theme, family, appear
   // (spec: the engine has no timers, so a flag is always something outside it
   // decides and then tells it about, exactly like resign).
   useEffect(() => {
-    if (gameOver || control.unlimited) return;
+    if (gameOver || reviewOnly || control.unlimited) return;
     const interval = window.setInterval(() => {
       const current = Date.now();
       setNow(current);
@@ -539,7 +739,7 @@ export default function Game({ variant, control, computer, theme, family, appear
       }
     }, 250);
     return () => window.clearInterval(interval);
-  }, [gameOver, control.unlimited, clock]);
+  }, [gameOver, reviewOnly, control.unlimited, clock]);
 
   // --- The computer opponent (M4): one worker for the component's life
   // (spec 9.4, "search never blocks the board"), a message handler kept
@@ -629,7 +829,7 @@ export default function Game({ variant, control, computer, theme, family, appear
     }
 
     const captorEl = container.querySelector(`[data-square="${anim.move.to}"]`);
-    const { dx, dy } = slideOffsetPx(anim.move.from, anim.move.to, squarePx);
+    const { dx, dy } = slideOffsetPx(anim.move.from, anim.move.to, squarePx, orientation);
     const duration = anim.motion ? MOTION_MS.capture : MOTION_MS.slide;
     captorEl?.animate(captorKeyframes(anim.motion, dx, dy), {
       duration,
@@ -647,8 +847,11 @@ export default function Game({ variant, control, computer, theme, family, appear
     // `Record<Side, string>` below.)
     if (anim.motion && captured && captured.owner !== 'neutral') {
       const square = anim.move.to; // captures land ON the taken piece's square
-      const col = square % 9;
-      const row = Math.floor(square / 9);
+      // Screen cell, not the raw index: the overlay sits on top of the board
+      // in page coordinates, so it has to be placed where the square is DRAWN.
+      // Deriving row and col from the index arithmetic directly would put the
+      // dying piece in the wrong place on a rotated board.
+      const { row, col } = displayCell(square, orientation);
       overlay = document.createElement('div');
       overlay.className = 'victim-overlay';
       overlay.style.left = `${col * squarePx}px`;
@@ -660,12 +863,12 @@ export default function Game({ variant, control, computer, theme, family, appear
         family,
         mode: squarePx * 0.62 >= 32 ? 'standalone' : 'knockout',
         squarePx,
-        color: appearance.sideColors[captured.owner],
+        color: view.sideColors[captured.owner],
         // The overlay sits exactly over the real square, so painting a
         // knockout mark in the theme's actual square colour reads as
         // seamless against what's already underneath it.
         squareColor: THEMES[theme].square,
-        isOpponent: captured.owner !== appearance.viewerSide,
+        isOpponent: captured.owner !== view.viewerSide,
       });
       container.appendChild(overlay);
       const victimAnim = overlay.animate(victimKeyframes(anim.motion), { duration, fill: 'forwards' });
@@ -681,20 +884,39 @@ export default function Game({ variant, control, computer, theme, family, appear
   }, [anim]);
 
   const drawOfferPending = offers.pending?.kind === 'draw' ? offers.pending : null;
+  const opponentSide = other(humanSide);
+
+  /**
+   * Spec 10.7's numbers, computed once the game is actually over — replaying
+   * the whole game on every render of a live board would be waste, and there
+   * is nothing to show until there is a result.
+   */
+  const summary = useMemo(
+    () => (gameOver ? summarise(replay(variant, history).events) : null),
+    [gameOver, variant, history],
+  );
 
   return (
-    <div className="game">
+    // `--board-px` is the one number the panels, the move list and the overlay
+    // all line up against, and it is the SAME number the renderer is handed —
+    // so the layout cannot drift from the board it is framing.
+    <div className="game" style={{ '--board-px': `${boardPx}px` } as React.CSSProperties}>
       <button className="back" onClick={onExit} type="button">
         ← Home
       </button>
 
       <Panel
-        side="red"
-        counts={counts.red}
-        remainingMs={remainingAt(clock, 'red', now)}
-        urgency={urgencyOf(clock, 'red', now)}
-        running={clock.running === 'red'}
-        onGiveTime={canGive(GIFT_POLICIES[mode], giftFrom('red'), 'red').ok ? () => giveTimeTo('red') : null}
+        side={opponentSide}
+        place="opponent"
+        counts={counts[opponentSide]}
+        remainingMs={reviewOnly ? null : remainingAt(clock, opponentSide, now)}
+        urgency={urgencyOf(clock, opponentSide, now)}
+        running={clock.running === opponentSide}
+        onGiveTime={
+          canGive(GIFT_POLICIES[mode], giftFrom(opponentSide), opponentSide).ok
+            ? () => giveTimeTo(opponentSide)
+            : null
+        }
       />
 
       <div
@@ -703,7 +925,11 @@ export default function Game({ variant, control, computer, theme, family, appear
         style={{ width: boardPx, height: boardPx }}
         tabIndex={0}
         role="group"
-        aria-label={`${variant.name} board. Use arrow keys to move the cursor, Enter to select or move.`}
+        aria-label={
+          reviewing
+            ? `${variant.name} board, reviewing move ${fullMoveOf(viewPly ?? 0)} of ${fullMoveOf(history.length)}. Use left and right arrows to step.`
+            : `${variant.name} board. Use arrow keys to move the cursor, Enter to select or move.`
+        }
         onPointerDown={onPointerDown}
         onPointerUp={onPointerUp}
         onKeyDown={onKeyDown}
@@ -712,12 +938,17 @@ export default function Game({ variant, control, computer, theme, family, appear
       />
 
       <Panel
-        side="blue"
-        counts={counts.blue}
-        remainingMs={remainingAt(clock, 'blue', now)}
-        urgency={urgencyOf(clock, 'blue', now)}
-        running={clock.running === 'blue'}
-        onGiveTime={canGive(GIFT_POLICIES[mode], giftFrom('blue'), 'blue').ok ? () => giveTimeTo('blue') : null}
+        side={humanSide}
+        place="you"
+        counts={counts[humanSide]}
+        remainingMs={reviewOnly ? null : remainingAt(clock, humanSide, now)}
+        urgency={urgencyOf(clock, humanSide, now)}
+        running={clock.running === humanSide}
+        onGiveTime={
+          canGive(GIFT_POLICIES[mode], giftFrom(humanSide), humanSide).ok
+            ? () => giveTimeTo(humanSide)
+            : null
+        }
       />
 
       <p className="status" aria-live="polite">
@@ -736,33 +967,89 @@ export default function Game({ variant, control, computer, theme, family, appear
         </div>
       )}
 
-      <div className="bar">
-        <button type="button" onClick={undo} disabled={history.length === 0 || gameOver} title="Undo">
-          ↺
-        </button>
-        <button
-          type="button"
-          onClick={offerDraw}
-          disabled={gameOver || drawOfferPending != null || !OFFER_POLICIES[mode].allowed.includes('draw')}
-          title="Offer draw"
-        >
-          ½
-        </button>
-        <button type="button" onClick={doAbort} disabled={gameOver || !canAbort(gameState.ply, mode).ok} title="Abort game">
-          ⊗
-        </button>
-        <button type="button" onClick={doResign} disabled={gameOver} className="resign" title="Resign">
-          ⚐
-        </button>
-      </div>
-
-      {gameState.result && (
-        <div className="game-over">
-          <p>{describeResult(gameState.result)}</p>
-          <button type="button" onClick={doRematch} className="play">
-            Rematch
+      {reviewing ? (
+        // Spec 10.8: "steps through a game with the arrows, and jumps to the
+        // start or end". The same controls the keyboard already drives, so
+        // touch gets the feature too rather than only a keyboard does.
+        <div className="bar bar--review">
+          <button type="button" onClick={() => setViewPly(0)} disabled={viewPly === 0} title="Start">
+            ⏮
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewPly(Math.max(0, (viewPly ?? 0) - 1))}
+            disabled={viewPly === 0}
+            title="Previous move"
+          >
+            ‹
+          </button>
+          <span className="review-count">
+            {fullMoveOf(viewPly ?? 0)} / {fullMoveOf(history.length)}
+          </span>
+          <button
+            type="button"
+            onClick={() => setViewPly(Math.min(history.length, (viewPly ?? 0) + 1))}
+            disabled={viewPly === history.length}
+            title="Next move"
+          >
+            ›
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewPly(history.length)}
+            disabled={viewPly === history.length}
+            title="End"
+          >
+            ⏭
+          </button>
+          {!reviewOnly && (
+            <button type="button" className="review-leave" onClick={() => setViewPly(null)}>
+              Back to game
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="bar">
+          <button type="button" onClick={undo} disabled={history.length === 0 || gameOver} title="Undo">
+            ↺
+          </button>
+          <button
+            type="button"
+            onClick={offerDraw}
+            disabled={gameOver || drawOfferPending != null || !OFFER_POLICIES[mode].allowed.includes('draw')}
+            title="Offer draw"
+          >
+            ½
+          </button>
+          <button type="button" onClick={doAbort} disabled={gameOver || !canAbort(gameState.ply, mode).ok} title="Abort game">
+            ⊗
+          </button>
+          <button type="button" onClick={doResign} disabled={gameOver} className="resign" title="Resign">
+            ⚐
           </button>
         </div>
+      )}
+
+      <MoveList
+        moves={history}
+        viewPly={viewPly}
+        defaultOpen={wideEnoughForList}
+        onPick={(ply) => setViewPly(ply)}
+      />
+
+      {gameState.result && summary && !reviewing && (
+        <GameOver
+          result={gameState.result}
+          summary={summary}
+          humanSide={computer ? humanSide : null}
+          onRematch={() => rematch(false)}
+          // Nothing to swap in pass-and-play: both players are on the one
+          // device and neither of them "is" a side the board is drawn for.
+          onSwapSides={computer ? () => rematch(true) : null}
+          onReview={() => setViewPly(0)}
+          onCopyLink={copyLink}
+          copyNote={copyNote}
+        />
       )}
     </div>
   );
@@ -770,18 +1057,41 @@ export default function Game({ variant, control, computer, theme, family, appear
 
 interface PanelProps {
   side: Side;
+  /**
+   * Which corner this panel belongs beside, NOT which colour it is. Each
+   * player's name sits by their own corner (the Bar layout,
+   * docs/VISUAL_SYSTEM.md 8) — and because the board turns around for a
+   * Red-playing human (spec 10.2), the viewer's own corner is always the
+   * bottom-left one on screen. So the anchoring is a function of "yours or
+   * theirs", never of blue or red, and it needs no second rule for a
+   * rotated board.
+   */
+  place: 'you' | 'opponent';
   counts: Record<PieceType, number>;
-  remainingMs: number;
+  /**
+   * null hides the chip entirely, which is what a review wants: the record
+   * carries a per-move `remainingMs` (spec 8.3) but nothing here replays it
+   * yet, and a chip reading the control's full 10:00 over a game somebody
+   * actually lost on time would be a straight lie. Reconstructing the clock
+   * ply by ply is a real review feature and belongs with M8's persistence.
+   */
+  remainingMs: number | null;
   urgency: Urgency;
   running: boolean;
   /** null when this mode/direction can't gift time (spec: e.g. self-gift, off outside vs-computer). */
   onGiveTime: (() => void) | null;
 }
 
-function Panel({ side, counts, remainingMs, urgency, running, onGiveTime }: PanelProps) {
+function Panel({ side, place, counts, remainingMs, urgency, running, onGiveTime }: PanelProps) {
+  const name = side === 'blue' ? 'Blue' : 'Red';
   return (
-    <div className={`panel panel--${side}`}>
-      <span className="panel-name">{side === 'blue' ? 'Blue' : 'Red'}</span>
+    <div className={`panel panel--${place} panel--${side}`}>
+      <span className="panel-name">
+        {/* Colour alone never carries ownership (spec 10.3, CLAUDE.md), so the
+            swatch is decoration beside a name that already says which side. */}
+        <span className="panel-dot" aria-hidden="true" />
+        {name}
+      </span>
       <span className="panel-counts">
         {(['rock', 'paper', 'scissors'] as const).map((type) => (
           <span key={type} className={`count${counts[type] === 0 ? ' count--out' : counts[type] === 1 ? ' count--last' : ''}`}>
@@ -790,14 +1100,16 @@ function Panel({ side, counts, remainingMs, urgency, running, onGiveTime }: Pane
           </span>
         ))}
       </span>
-      <span className={`clock-chip clock-chip--${urgency}${running ? ' clock-chip--running' : ''}`}>
-        {formatClock(remainingMs)}
-        {onGiveTime && (
-          <button type="button" className="gift" onClick={onGiveTime} title={`Give ${side === 'blue' ? 'Blue' : 'Red'} 15s`}>
-            +
-          </button>
-        )}
-      </span>
+      {remainingMs !== null && (
+        <span className={`clock-chip clock-chip--${urgency}${running ? ' clock-chip--running' : ''}`}>
+          {formatClock(remainingMs)}
+          {onGiveTime && (
+            <button type="button" className="gift" onClick={onGiveTime} title={`Give ${name} 15s`}>
+              +
+            </button>
+          )}
+        </span>
+      )}
     </div>
   );
 }

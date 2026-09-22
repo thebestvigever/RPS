@@ -15,10 +15,11 @@ the previous milestone's "done when" holds.**
 | C1 | Clocks, offers and time gifts (`docs/ADDENDUM-CLOCKS.md`) | Clock, offers and gift policy green; engine still timer-free | **done, and rendered (M3c)** |
 | C2 | Premove, abort, low-time warning, Zen | Logic green; rendering waits on M3 | **done; abort and low-time rendered (M3c) — premove and Zen wait on M4/M6** |
 | M4 | Play against the computer: worker, three levels, undo | Hard stays inside its time budget on a phone | **done** |
+| M4b | Board orientation, and the four cuts it was blocking: side picker, corner-anchored panels, move list + game-over overlay, Undo's clock refund | Playable as Red; §10.7's four buttons all work; Undo puts both clocks back | **done** |
 | M5 | 2×2 Corner and Neutrals, and the variant picker | All three variants playable both ways | |
 | M6 | Information aids (§10.5) | Each aid on and off, correct in the fixture positions | |
 | M7 | How to play and the tutorial | A new player finishes all six puzzles | |
-| M8 | Sound, animation, accessibility, persistence, review and share links | §11.6 passes | |
+| M8 | Sound, animation, accessibility, persistence; the clock's replay in review | §11.6 passes | review and share links landed early with M4b |
 | M9 | Release | §11.7 fully ticked; deployed | |
 
 ## What C1 left behind
@@ -59,8 +60,9 @@ it is not meaningfully ahead, refuses in the opening, and accepts outright when
 both corners are sealed — §6.3 found that is where the Original's draws come
 from, so there is genuinely nothing to play on for.
 
-**Not built:** the clock UI, the time-control picker, and wiring the record's
-`clock` section on save. Those are M3/M8, and they wait on visual direction.
+**Not built at the time:** the clock UI, the time-control picker, and wiring
+the record's `clock` section on save. The first two arrived with M3c; the
+third with M4b, which needed the same per-ply snapshots to refund Undo.
 
 ## What M2 left behind
 
@@ -208,24 +210,25 @@ its own state, not in anything pure enough to unit test.
 
 **What's a real, documented simplification rather than a miss:**
 
-* **Corner-anchored names.** `docs/VISUAL_SYSTEM.md` 5 describes names sitting
-  beside each player's own corner. `Game.tsx` stacks two panels instead
-  (opponent above the board, yours below — spec 10.11's own phone layout).
-  Functionally the same information; the corner-precise positioning is
-  deferred rather than rushed.
+* **Corner-anchored names.** The design has names sitting beside each
+  player's own corner. `Game.tsx` stacked two plain panels instead (opponent
+  above the board, yours below — spec 10.11's own phone layout): functionally
+  the same information, with the corner-precise positioning deferred rather
+  than rushed. **Done in M4b**, which needed orientation first.
 * **Cut's victim doesn't split into two halves.** The captor's motion is the
   real thing (README 3b's rotate-close); the taken piece fades and scales
   instead of splitting, because a true split needs its own geometry per
   family and this pass owns getting the mechanism working, not every
   family's exact silhouette break.
-* **No board flip.** Pass-and-play always shows Blue's corner bottom-left.
-  Spec 10.2's "flip each turn" toggle needs orientation-aware square mapping
-  that nothing in `@sps/board` does yet — a real feature, not a bug, and
-  worth its own pass rather than a rushed half-version here.
+* **No board flip.** Spec 10.2's orientation-aware square mapping was a real
+  feature, not a bug, and worth its own pass rather than a rushed half-version
+  — which is what it got in **M4b**. (Pass-and-play still shows Blue's corner
+  bottom-left, which is what 10.2 asks for; its optional "flip each turn"
+  setting remains Settings work.)
 * **Move list and the full game-over overlay (Rematch, Swap sides, Review,
   Copy link) aren't built.** The status line and a plain result sentence are
-  what M3's gate actually needed; the four-button overlay in spec 10.7 pairs
-  naturally with M3c's offer/rematch work and is picked up there.
+  what M3's gate actually needed. M3c shipped one of the four buttons;
+  **M4b shipped the rest, the move list and the share links they depend on.**
 
 `@sps/board` grew three pure, tested pieces for this: `motion.ts`
 (`captureMotion`, matchup -> name, nothing else), `text.ts` (spec 10.4's two
@@ -253,15 +256,9 @@ to i5") with zero console errors, and a draw offer answered by the real
 `shouldAcceptDraw` ("Computer declines — it is too early to tell" — the exact
 sentence `packages/ai/src/draw.ts` produces for a position under `DRAW_MIN_PLY`).
 
-**One thing is a documented scope decision, not a gap: the human only ever
-plays Blue.** Spec 10.2 rotates the board 180 degrees for a human playing
-Red, and no `@sps/board` release does board orientation yet — that was M3b's
-own documented cut, for the same reason. Letting Home offer "play Red" before
-orientation exists would show a Red-playing human their own pieces starting
-in the far corner, which is worse than not offering the choice at all. Home's
-side picker (Blue / Red / Random, spec 10.1) and Rematch's "sides swapped"
-button both wait on it — one milestone's cut turning out to gate two features
-later is worth knowing, not just noting once.
+**The human only ever played Blue** — a documented scope decision at the time,
+and the one M3b cut that turned out to gate two later features (Home's side
+picker and Rematch's "sides swapped"). **Closed in M4b below.**
 
 **`shouldAcceptDraw` runs on the main thread, not the worker.** It can search
 as deep as `chooseMove` does, so this is the one place M4 doesn't fully honour
@@ -273,9 +270,119 @@ folded in here.
 
 **Undo against the computer takes back two plies (spec 10.8)**, landing back
 on the human's own turn — verified by playing one exchange and undoing it
-back to the empty history. It doesn't refund clock time any more than M3b's
-pass-and-play undo does, for the same reason (a real replay needs the
-record's per-move `remainingMs`, spec 8.3 — M8).
+back to the empty history. It did not refund clock time; **M4b below does.**
+
+## What M4b left behind
+
+Four things M3b and M4 had each cut for the same reason, and one of them was
+the reason: **the board could not be turned around.** `@sps/board` now does
+orientation, and the other three fell out of it.
+
+**Orientation is a display mapping, and only a display mapping.** The engine's
+square numbering never rotates — a1 is square 72 whichever way anyone is
+looking, and every rule, event and move string stays in those absolute terms.
+`packages/board/src/orientation.ts` is the whole of it: `displayCell` and
+`squareAtCell`, one pair, used in both directions.
+
+That pair being shared is the point, not a tidiness preference. `apps/web`
+needs the mapping read **backwards** — a pointer lands on a screen cell and
+has to come back as a `Square` — and it needs it a third time for arrow keys,
+which move the cursor in *screen* directions, so a Red-playing human pressing
+Up moves up the screen and down the board. A second copy of the rotation would
+have disagreed the first time either was touched, and it would have disagreed
+*silently*, as taps landing one square off. Nothing type-checks that.
+
+The renderer has one chokepoint (`squareXY`) that every layer already went
+through, so pieces, tints, the last-move highlight, selection and the focus
+ring all rotated together for free. **The coordinates did not** — that layer
+computes its own positions — and a board whose pieces turn while its labels do
+not is exactly the bug that survives a screenshot review. `coordinatesLayer`
+now reads its letters back through `squareAtCell`, so the two cannot drift,
+and `render.test.ts` pins `abcdefghi` against `ihgfedcba`.
+
+**What that unblocked:** Home's side picker (Blue / Red / Random, §10.1),
+Rematch's "sides swapped" (§10.7), and the panels below.
+
+**Corner-anchored panels** (the Bar layout). Each player's name sits beside
+their own corner rather than in a neutral row. Two things make that work at
+360px without a second layout:
+
+* The panel is exactly as wide as the board — `--board-px`, set inline from
+  the same number the renderer is handed — so its outer edge lines up with the
+  board's and the name really is over the corner square, not the page margin.
+* It anchors by **whose** panel it is, never by colour. Because the board turns
+  around, the viewer's own corner is always bottom-left on screen, so "yours,
+  bottom-left" holds either way where "Blue, bottom-left" would be wrong half
+  the time. `place: 'you' | 'opponent'` is the prop; there is no second rule
+  for a rotated board.
+
+**Undo refunds the clock**, and the thing that makes it possible is worth more
+than the refund. `Game.tsx` keeps a `clockStack` where `stack[n]` is the clock
+with n moves played. Undo restores `rewind(stack, target)` and re-anchors it
+with `startTurn` — **both** sides, and the stage each was in, not just the
+player who pressed it. A single `remainingMs` would have thrown four of those
+five things away.
+
+That stack **is** the per-move `remainingMs` §8.3's record carries, which is
+why the same commit could finally wire the record's `clock` section — the last
+"not built" item C1 left. So Copy link ships a link that tells the truth about
+a timed game instead of quietly dropping the clock, which is what
+`GameClockRecord`'s own comment asks for.
+
+Gifts made before the undone point survive, because they are in the snapshot;
+one made *during* an undone turn does not. Nothing is farmable either way — a
+self-gift is already unlimited against the computer (`gifts.ts`: "there is
+nobody to cheat"), and in pass-and-play a gift only ever helps the opponent.
+
+**Move list and the full game-over overlay** (§10.7, §10.8). One piece of
+state — `viewPly` — serves both of §10.8's readers: tapping a move in the list,
+and Review's own stepper. Positions are replayed rather than stacked, because
+the move list is the source of truth (`CLAUDE.md`) and a 140-ply replay is well
+under a frame. In review the arrows step instead of moving the cursor, which is
+not a clash: a read-only board has no cursor to move.
+
+The overlay's numbers come from `summarise` over the engine's event stream,
+never from comparing the start position with the end one — "**when** a type
+went extinct" is not recoverable from two boards at all, and a capture count
+taken by subtracting piece counts would miscount a game where a neutral was
+taken.
+
+**Share links** (§8.4) are `packages/engine/src/share.ts`, beside `fen.ts` and
+`notation.ts`, because §8 is one subject: how a game is written down. Base64
+and UTF-8 are hand-rolled — `btoa` is latin1-only and deprecated in Node,
+`TextEncoder`/`Buffer` are environment-specific, and the package's contract is
+that browser, AI, tests and any future server run it unchanged. Opening a link
+is built too: shipping Copy link without it would have been a button that
+produces a dead URL.
+
+**Two bugs, both found by driving the app rather than reading it** — the same
+way M3a's scissors and M3b's tap race were:
+
+* **Rematch rendered as plain text.** `.game-over-buttons button` is a class
+  plus a type selector, which out-specifies `.play`'s single class in
+  `styles.css`, so the primary button lost its background and border and read
+  as a label. Restated in `game.css` rather than left to import order.
+* **A review ran a clock.** `reviewOnly` started the clock like any game, so a
+  shared link left open would have ticked a finished game down to a flag and
+  invented a result nobody played for. The clock is now never started in
+  review, the flag detector skips it, and the chips are hidden rather than
+  showing the control's full 10:00 over a game somebody actually lost on time.
+
+**Not done, and not pretended:**
+
+* **A review does not reconstruct the clock.** The record carries the per-move
+  `remainingMs` to do it; nothing replays it yet, so the chips are hidden
+  instead of lying. That is a real review feature and belongs with M8.
+* **Local stats** (§10.7's wins/losses/draws/streak) are `localStorage`, so
+  they are M8's persistence work — the same milestone that owns resuming an
+  in-progress game. A streak that reset on every reload would be worse than
+  none.
+* **Pass-and-play still keeps one orientation**, which is what §10.2 asks for.
+  Its optional "flip each turn" setting is Settings work, and off by default.
+* **§10.5's consequence line** ("Red has no Paper left — Blue's Rocks are
+  permanent") is still missing from the type-counts aid. It is a gap in a
+  shipped aid rather than one of these four items, so it was left for M6 with
+  the rest of the aid layer.
 
 ## What M3c left behind
 
@@ -308,13 +415,12 @@ players are already at the device; there is no losing side to ask for
 consent, unlike a draw. It calls `createGame` directly rather than exercising
 the `rematch` offer kind — that kind's real test is still M5.
 
-**Not done, and not pretended:** the four-button game-over overlay (spec
-10.7's Rematch/Swap sides/Review/Copy link — this ships one of the four), the
-move list, and an accurate clock replay on Undo (it restarts the clock for
-whoever moves next without refunding the undone move's time — a full replay
-needs the per-move `remainingMs` the record carries, spec 8.3, which is M8's
-persistence work). Zen (C2) has nothing to hide yet — that's the aid layer,
-M6.
+**Not done at the time:** the four-button game-over overlay (spec 10.7's
+Rematch/Swap sides/Review/Copy link — M3c ships one of the four), the move
+list, and an accurate clock replay on Undo. **All three are M4b's**, which
+found that the per-move `remainingMs` spec 8.3 carries did not need M8's
+persistence to exist — only to be kept in memory as the game is played. Zen
+(C2) has nothing to hide yet — that's the aid layer, M6.
 
 ## What M1 left behind
 

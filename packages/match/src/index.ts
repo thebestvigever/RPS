@@ -26,9 +26,13 @@ export {
   startTurn,
   stop,
   tick,
+  turnSide,
   URGENCY,
   urgencyOf,
 } from './clock.js';
+
+export type { ClockStack } from './record.js';
+export { RecordError, clockRecord, rewind } from './record.js';
 
 export type {
   MatchMode,

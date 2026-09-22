@@ -27,6 +27,7 @@ import type { PieceType, Side, Square, VariantConfig } from '@sps/engine';
 import { CORNER_TINT_ALPHA, LAST_MOVE_TINT_ALPHA, THEMES, type ThemeId } from './themes.js';
 import { familyMark, type Family, type FamilyId } from './families.js';
 import { renderMode, type RenderMode } from './ownership.js';
+import { DEFAULT_ORIENTATION, displayCell, squareAtCell, type Orientation } from './orientation.js';
 import { dotAlpha } from './contrast.js';
 import {
   CAPTURE_RING_DIAMETER_FRACTION,
@@ -56,8 +57,11 @@ export interface Appearance {
    */
   sideColors: Record<Side, string>;
   /** Which Side this render is FOR — decides which pieces get the opponent's
-   * ring or inverted disc (docs/VISUAL_SYSTEM.md 2). Board orientation is a
-   * separate, later concern (spec 10.2); this alone does not flip the board. */
+   * ring or inverted disc (docs/VISUAL_SYSTEM.md 2). Deliberately still NOT
+   * the same input as orientation: a Red-playing human wants Red's cues and
+   * Red's corner bottom-left, but pass-and-play wants Blue's orientation
+   * throughout (spec 10.2) while the cues follow whoever is to move. Two
+   * inputs, because the app really does set them independently. */
   viewerSide: Side;
 }
 
@@ -88,6 +92,8 @@ export interface RenderOptions {
   selection?: Selection | null;
   /** The keyboard focus cursor (spec 10.4/10.10) — a visible ring distinct from selection's. */
   focusSquare?: Square | null;
+  /** Whose corner sits bottom-left (spec 10.2). Defaults to Blue's. */
+  orientation?: Orientation;
 }
 
 export function renderBoard(options: RenderOptions): string {
@@ -102,6 +108,7 @@ export function renderBoard(options: RenderOptions): string {
     lastMove = null,
     selection = null,
     focusSquare = null,
+    orientation = DEFAULT_ORIENTATION,
   } = options;
 
   const themeTokens = THEMES[themeId];
@@ -114,8 +121,8 @@ export function renderBoard(options: RenderOptions): string {
 
   const layers = [
     backgroundLayer(boardPx, squarePx, themeTokens.square, themeTokens.grid),
-    cornerTintLayer(variant, appearance.sideColors, squarePx),
-    lastMove ? lastMoveLayer(lastMove, themeTokens.ink, squarePx) : '',
+    cornerTintLayer(variant, appearance.sideColors, squarePx, orientation),
+    lastMove ? lastMoveLayer(lastMove, themeTokens.ink, squarePx, orientation) : '',
     flameLayer(boardPx, themeTokens.ink),
     piecesLayer(
       state.board,
@@ -126,10 +133,15 @@ export function renderBoard(options: RenderOptions): string {
       themeTokens.square,
       themeTokens.neutral,
       squarePx,
+      orientation,
     ),
-    coordinates ? coordinatesLayer(boardPx, squarePx, themeTokens.muted, themeTokens.fonts.mono) : '',
-    selection ? selectionLayer(selection, state.board, appearance.sideColors, themeTokens.square, squarePx) : '',
-    focusSquare != null ? focusLayer(focusSquare, themeTokens.ink, squarePx) : '',
+    coordinates
+      ? coordinatesLayer(boardPx, squarePx, themeTokens.muted, themeTokens.fonts.mono, orientation)
+      : '',
+    selection
+      ? selectionLayer(selection, state.board, appearance.sideColors, themeTokens.square, squarePx, orientation)
+      : '',
+    focusSquare != null ? focusLayer(focusSquare, themeTokens.ink, squarePx, orientation) : '',
   ];
 
   return group(
@@ -146,11 +158,14 @@ export function renderBoard(options: RenderOptions): string {
   );
 }
 
-function squareXY(square: Square, squarePx: number): { x: number; y: number } {
-  // Row 0 is rank 9 (top) in the engine's own numbering (board.ts), so this
-  // needs no flip to put Blue's corner (a1, row 8) at the bottom — spec 10.2's
-  // default orientation.
-  return { x: colOf(square) * squarePx, y: rowOf(square) * squarePx };
+function squareXY(square: Square, squarePx: number, orientation: Orientation): { x: number; y: number } {
+  // Row 0 is rank 9 (top) in the engine's own numbering (board.ts), so Blue's
+  // corner (a1, row 8) lands at the bottom with no flip at all — spec 10.2's
+  // default orientation. `displayCell` is what turns that into Red's view
+  // when it is Red looking, and it is the SAME function apps/web reads
+  // backwards to turn a click into a square.
+  const { row, col } = displayCell(square, orientation);
+  return { x: col * squarePx, y: row * squarePx };
 }
 
 function centredOffset(squarePx: number, boxPx: number): number {
@@ -174,11 +189,16 @@ function backgroundLayer(boardPx: number, squarePx: number, squareColor: string,
  * 2x2 Corner variant's four-square blocks, so this needs no per-variant
  * branch (CLAUDE.md: variants are data).
  */
-function cornerTintLayer(variant: VariantConfig, sideColors: Record<Side, string>, squarePx: number): string {
+function cornerTintLayer(
+  variant: VariantConfig,
+  sideColors: Record<Side, string>,
+  squarePx: number,
+  orientation: Orientation,
+): string {
   const rects: string[] = [];
   for (const side of ['blue', 'red'] as const) {
     for (const square of homeSquares(variant, side)) {
-      const { x, y } = squareXY(square, squarePx);
+      const { x, y } = squareXY(square, squarePx, orientation);
       rects.push(
         el('rect', {
           x: round(x),
@@ -194,9 +214,14 @@ function cornerTintLayer(variant: VariantConfig, sideColors: Record<Side, string
   return group('g', {}, rects.join(''));
 }
 
-function lastMoveLayer(lastMove: { from: Square; to: Square }, ink: string, squarePx: number): string {
+function lastMoveLayer(
+  lastMove: { from: Square; to: Square },
+  ink: string,
+  squarePx: number,
+  orientation: Orientation,
+): string {
   const rects = [lastMove.from, lastMove.to].map((square) => {
-    const { x, y } = squareXY(square, squarePx);
+    const { x, y } = squareXY(square, squarePx, orientation);
     return el('rect', {
       x: round(x),
       y: round(y),
@@ -222,26 +247,27 @@ function selectionLayer(
   sideColors: Record<Side, string>,
   squareColor: string,
   squarePx: number,
+  orientation: Orientation,
 ): string {
   const code = board[selection.square]!;
   const piece = code === EMPTY ? null : decodePiece(code);
   const color = piece && piece.owner !== 'neutral' ? sideColors[piece.owner] : Object.values(sideColors)[0]!;
 
-  const parts: string[] = [selectionRing(selection.square, color, squarePx)];
+  const parts: string[] = [selectionRing(selection.square, color, squarePx, orientation)];
 
   for (const destination of selection.destinations) {
     parts.push(
       destination.capture
-        ? captureRing(destination.square, color, squarePx)
-        : legalDot(destination.square, color, squareColor, squarePx),
+        ? captureRing(destination.square, color, squarePx, orientation)
+        : legalDot(destination.square, color, squareColor, squarePx, orientation),
     );
   }
 
   return group('g', {}, parts.join(''));
 }
 
-function selectionRing(square: Square, color: string, squarePx: number): string {
-  const { x, y } = squareXY(square, squarePx);
+function selectionRing(square: Square, color: string, squarePx: number, orientation: Orientation): string {
+  const { x, y } = squareXY(square, squarePx, orientation);
   const stroke = Math.max(1, squarePx * SELECTION_RING_STROKE_FRACTION);
   return el('rect', {
     x: round(x + stroke / 2),
@@ -254,8 +280,14 @@ function selectionRing(square: Square, color: string, squarePx: number): string 
   });
 }
 
-function legalDot(square: Square, color: string, squareColor: string, squarePx: number): string {
-  const { x, y } = squareXY(square, squarePx);
+function legalDot(
+  square: Square,
+  color: string,
+  squareColor: string,
+  squarePx: number,
+  orientation: Orientation,
+): string {
+  const { x, y } = squareXY(square, squarePx, orientation);
   const diameter = squarePx * LEGAL_DOT_DIAMETER_FRACTION;
   return el('circle', {
     cx: round(x + squarePx / 2),
@@ -266,8 +298,8 @@ function legalDot(square: Square, color: string, squareColor: string, squarePx: 
   });
 }
 
-function captureRing(square: Square, color: string, squarePx: number): string {
-  const { x, y } = squareXY(square, squarePx);
+function captureRing(square: Square, color: string, squarePx: number, orientation: Orientation): string {
+  const { x, y } = squareXY(square, squarePx, orientation);
   const diameter = squarePx * CAPTURE_RING_DIAMETER_FRACTION;
   const stroke = Math.max(1, squarePx * CAPTURE_RING_STROKE_FRACTION);
   return el('circle', {
@@ -281,8 +313,8 @@ function captureRing(square: Square, color: string, squarePx: number): string {
 }
 
 /** The keyboard cursor — dashed, so it's never confused with selection's solid ring or ownership's cue (spec 10.10). */
-function focusLayer(square: Square, ink: string, squarePx: number): string {
-  const { x, y } = squareXY(square, squarePx);
+function focusLayer(square: Square, ink: string, squarePx: number, orientation: Orientation): string {
+  const { x, y } = squareXY(square, squarePx, orientation);
   const diameter = squarePx * FOCUS_RING_DIAMETER_FRACTION;
   const stroke = Math.max(1, squarePx * FOCUS_RING_STROKE_FRACTION);
   const dash = Math.max(1, squarePx * FOCUS_RING_DASH_FRACTION);
@@ -343,7 +375,20 @@ function flameLayer(boardPx: number, ink: string): string {
   return defs + group('g', { opacity: 0.07 }, hatch + ring);
 }
 
-function coordinatesLayer(boardPx: number, squarePx: number, muted: string, fontFamily: string): string {
+/**
+ * The edge labels, spec 10.2. Which letter belongs over which column is read
+ * back through `squareAtCell` rather than computed a second time: a rotated
+ * board whose pieces move but whose coordinates do not is exactly the kind of
+ * bug that survives a screenshot review, and deriving both from one mapping
+ * makes it unrepresentable.
+ */
+function coordinatesLayer(
+  boardPx: number,
+  squarePx: number,
+  muted: string,
+  fontFamily: string,
+  orientation: Orientation,
+): string {
   const labels: string[] = [];
   const fontSize = round(Math.max(8, boardPx * (10 / 640))); // 10px at the spec's 640px max board
   const pad = fontSize * 0.35;
@@ -353,12 +398,12 @@ function coordinatesLayer(boardPx: number, squarePx: number, muted: string, font
     labels.push(
       text(
         { x: round(x), y: round(boardPx - pad), 'font-family': fontFamily, 'font-size': fontSize, fill: muted },
-        FILE_LETTERS[col]!,
+        FILE_LETTERS[colOf(squareAtCell(0, col, orientation))]!,
       ),
     );
   }
   for (let row = 0; row < RANKS; row++) {
-    const rank = RANKS - row;
+    const rank = RANKS - rowOf(squareAtCell(row, 0, orientation));
     const y = row * squarePx + fontSize + pad * 0.5;
     labels.push(
       text(
@@ -382,6 +427,7 @@ function piecesLayer(
   squareColor: string,
   neutralColor: string,
   squarePx: number,
+  orientation: Orientation,
 ): string {
   const pieces: string[] = [];
   for (let square = 0; square < board.length; square++) {
@@ -389,7 +435,7 @@ function piecesLayer(
     if (code === EMPTY) continue;
     const piece = decodePiece(code);
     if (!piece) continue;
-    const { x, y } = squareXY(square, squarePx);
+    const { x, y } = squareXY(square, squarePx, orientation);
     const markup =
       piece.owner === 'neutral'
         ? neutralPiece(piece.type, family, neutralColor, squarePx)

@@ -26,6 +26,7 @@ export {
   IllegalMoveError,
   NotImplementedError,
   NotationError,
+  ShareError,
 } from './errors.js';
 
 export {
@@ -78,6 +79,17 @@ export {
   resign,
   toFen,
 } from './game.js';
+export type { Extinction, GameSummary } from './summary.js';
+export { summarise } from './summary.js';
+
+export {
+  SHARE_PREFIX,
+  base64UrlDecode,
+  base64UrlEncode,
+  decodeRecord,
+  encodeRecord,
+} from './share.js';
+
 export {
   canHoldSeal,
   distanceToGoal,

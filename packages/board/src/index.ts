@@ -9,6 +9,9 @@ export { FAMILY_IDS, FAMILY_INFO, BUILT_FAMILY_IDS, familyMark, scissorsMark } f
 export type { RenderMode } from './ownership.js';
 export { renderMode, standaloneMarkPx } from './ownership.js';
 
+export type { Cell, Orientation } from './orientation.js';
+export { DEFAULT_ORIENTATION, displayCell, squareAtCell } from './orientation.js';
+
 export {
   CONTRAST_FLOOR,
   contrastRatio,
