@@ -32,15 +32,20 @@ const REASON_TEXT: Record<string, string> = {
   corner: 'reached the corner',
   'no-moves': 'had no legal moves',
   resign: 'resigned',
-  flag: "ran out of time",
+  flag: 'ran out of time',
   repetition: 'the same position three times',
   'move-limit': 'the move limit',
   agreed: 'agreement',
-  aborted: 'abort',
 };
 
-/** "Blue wins — reached the corner." / "The game is a draw — the move limit." */
+/**
+ * "Blue wins — reached the corner." / "The game is a draw — the move limit."
+ * `aborted` gets its own sentence: the addendum is explicit that it "counts
+ * for nothing", which "a draw" would misstate — a draw is a result, and an
+ * abort is the absence of one.
+ */
 export function describeResult(result: GameResult): string {
+  if (result.reason === 'aborted') return 'Aborted — no result.';
   const reason = REASON_TEXT[result.reason] ?? result.reason;
   if (result.winner) return `${sideName(result.winner)} wins — ${reason}.`;
   return `The game is a draw — ${reason}.`;

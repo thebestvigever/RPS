@@ -11,9 +11,9 @@ the previous milestone's "done when" holds.**
 | M0 | Scaffold: workspace, packages, fixtures, test harness | `pnpm test`, `pnpm typecheck` and `pnpm build` all green | **done** |
 | M1 | Engine: rules, position notation, move notation, events, `isSealed` | §11.1–§11.4 green, perft matches | **done** |
 | M2 | AI and the `tools/sim` harness | Balance runs land near §6 for all three variants | **built** |
-| M3 | Board UI and pass-and-play, Original only | Two people can finish a game on one phone | **gate met (§ below); M3c next** |
-| C1 | Clocks, offers and time gifts (`docs/ADDENDUM-CLOCKS.md`) | Clock, offers and gift policy green; engine still timer-free | **done** |
-| C2 | Premove, abort, low-time warning, Zen | Logic green; rendering waits on M3 | **done** |
+| M3 | Board UI and pass-and-play, Original only | Two people can finish a game on one phone | **done** |
+| C1 | Clocks, offers and time gifts (`docs/ADDENDUM-CLOCKS.md`) | Clock, offers and gift policy green; engine still timer-free | **done, and rendered (M3c)** |
+| C2 | Premove, abort, low-time warning, Zen | Logic green; rendering waits on M3 | **done; abort and low-time rendered (M3c) — premove and Zen wait on M4/M6** |
 | M4 | Play against the computer: worker, three levels, undo | Hard stays inside its time budget on a phone | |
 | M5 | 2×2 Corner and Neutrals, and the variant picker | All three variants playable both ways | |
 | M6 | Information aids (§10.5) | Each aid on and off, correct in the fixture positions | |
@@ -235,6 +235,45 @@ to draw, never of when). Everything about *when* — the gesture state machine,
 the two WAAPI animations, the victim overlay — has no DOM to live in inside
 `@sps/board`, so it's `apps/web`'s, same split M3a drew for motion's naming
 versus its timing.
+
+## What M3c left behind
+
+C1's clock and C2's abort/low-time warning are on screen, driven by the exact
+`packages/match` code those milestones already shipped and tested — nothing
+in `clock.ts` or `offers.ts` changed to get here. The urgency colours, the
+flag detection, `+15s` in both directions and a real draw-offer exchange were
+all played through and checked by hand (`respondToDraw`, `giveTimeTo`), not
+just typechecked.
+
+Home also grew the time-control picker `docs/ADDENDUM-CLOCKS.md` left as "not
+built" after C1 — a clock nobody can set the length of would have been an odd
+thing to ship now that it's rendered. Defaults to `10+5`.
+
+**Two of M3c's row in `docs/VISUAL_SYSTEM.md` 8 turned out not to apply to
+pass-and-play, and were skipped rather than faked:**
+
+* **Takeback offers.** `OFFER_POLICIES['pass-and-play'].allowed` is `['draw',
+  'rematch']` — `packages/match`'s own comment says why: "Undo is unrestricted
+  against the computer and in pass-and-play, so a takeback only needs asking
+  for online." M3b's Undo already does that job. The offer machinery's
+  `takeback` kind gets its first real exercise in M5's online mode.
+* **Premove.** `canPremove('pass-and-play')` returns `false` — `premove.ts`'s
+  own comment: one person moving both sides means there is no waiting turn to
+  queue a move during. A premove ghost has nothing to attach to until M4 gives
+  the human an opponent who thinks on their own time.
+
+**Rematch is one click, not the offer/accept pair `offers.ts` models.** Both
+players are already at the device; there is no losing side to ask for
+consent, unlike a draw. It calls `createGame` directly rather than exercising
+the `rematch` offer kind — that kind's real test is still M5.
+
+**Not done, and not pretended:** the four-button game-over overlay (spec
+10.7's Rematch/Swap sides/Review/Copy link — this ships one of the four), the
+move list, and an accurate clock replay on Undo (it restarts the clock for
+whoever moves next without refunding the undone move's time — a full replay
+needs the per-move `remainingMs` the record carries, spec 8.3, which is M8's
+persistence work). Zen (C2) has nothing to hide yet — that's the aid layer,
+M6.
 
 ## What M1 left behind
 
