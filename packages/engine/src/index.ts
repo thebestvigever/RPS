@@ -67,6 +67,7 @@ export { goalSquares, homeSquares, isGoalSquare } from './goals.js';
 export { moveToText, parseMove } from './notation.js';
 export { findLegalMove, isLegal, legalMoves } from './moves.js';
 export {
+  abandon,
   abortGame,
   agreeDraw,
   applyMove,

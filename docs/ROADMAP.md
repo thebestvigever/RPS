@@ -98,7 +98,7 @@ Two decisions taken early pay off here:
 | Referee logic | Checking moves, running the clocks, declaring results | **built** |
 | Invite links | Create a game, send a link, whoever opens it takes the other side | **built** |
 | Dropout handling | Wifi dies mid-game: reconnect and carry on, and a rule for walking away | **built** |
-| A screen for it | Somewhere to press "play a friend", and a board that talks to the room | not started |
+| A screen for it | Somewhere to press "play a friend", and a board that talks to the room | **built** |
 
 The spec already chose the technology (§13.2): **Cloudflare Durable Objects**,
 which is built almost exactly for this. One small consistent "room" per match,
@@ -116,10 +116,18 @@ against the same rules the browser uses, runs both clocks, survives a player's
 wifi dying and hands the game to whoever is still there when a clock runs out.
 It has been driven end to end on Cloudflare's own runtime, not only in tests.
 
-**What it does not have is a screen.** Nothing in the app talks to it yet: there
-is no "play a friend" button and no join page. That is the next piece of work,
-and it is a smaller one — the hard half, which is being certain that neither
-player can lie about what happened, is done.
+**And it now has a screen.** Home has a "Play a friend" button; it gives you a
+link to send, and the first person to open it takes the other side. From there
+it is the ordinary board — the same pieces, the same aids, the same sounds —
+because the online game is that board with the room told about every move,
+rather than a second board built alongside it.
+
+Two rules Vig settled while it was being built. **Thirty seconds to play the
+first move**, or the game is called off and counts for nothing. And when
+somebody's connection dies, the player still there waits a minute and can then
+either **claim the win or call it a draw** — a claimed win is recorded as
+*abandoned*, which is the honest word for it: someone whose wifi died did not
+resign.
 
 `docs/ONLINE.md` is the reference: what the two sides say to each other, what
 the room refuses, how to run it, and the three things still waiting on Vig.

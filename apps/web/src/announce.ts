@@ -30,6 +30,7 @@ const REASON_TEXT: Record<string, string> = {
   'no-moves': 'had no legal moves',
   resign: 'resigned',
   flag: 'ran out of time',
+  abandoned: 'the game was abandoned',
   repetition: 'the same position three times',
   'move-limit': 'the move limit',
   agreed: 'agreement',

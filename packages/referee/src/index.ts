@@ -53,6 +53,7 @@ export type {
 } from './room.js';
 export {
   CLOSE,
+  FIRST_MOVE_MS,
   close,
   createRoom,
   gameRecord,
@@ -65,6 +66,8 @@ export {
   restoreRoom,
   wake,
 } from './room.js';
+
+export type { CreatedMatch, MatchSummary } from './http.js';
 
 export type { RoomSnapshot } from './storage.js';
 export { SNAPSHOT_VERSION, SnapshotError, loadRoom, saveRoom } from './storage.js';

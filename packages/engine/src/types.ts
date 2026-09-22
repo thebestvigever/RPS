@@ -24,12 +24,22 @@ export interface Move {
 export type MoveInput = Pick<Move, 'from' | 'to'>;
 
 /**
- * `flag` and `aborted` are decided outside the engine, which has no timers and
- * no concept of a session (7.1). They are here so that a finished game has one
- * vocabulary however it ended — see docs/ADDENDUM-CLOCKS.md.
+ * `flag`, `aborted` and `abandoned` are decided outside the engine, which has
+ * no timers, no network and no concept of a session (7.1). They are here so
+ * that a finished game has one vocabulary however it ended — see
+ * docs/ADDENDUM-CLOCKS.md, and docs/ONLINE.md for `abandoned`.
+ *
+ * `abandoned` is what an online game becomes when one player stops being
+ * there and the other claims it (13.2's "the opponent may claim the win after
+ * 60 seconds away"). It is deliberately NOT recorded as a resignation: a
+ * player who loses their wifi did not resign, and a record that says they did
+ * is a record that lies about them. `rulesVersion` stays 1 — no rule of play
+ * changed — and a reader that does not know this reason should treat it as
+ * "finished, cause unknown" rather than throwing, exactly as the clock
+ * addendum asked of `flag`.
  */
 export type GameResult =
-  | { winner: Side; reason: 'corner' | 'no-moves' | 'resign' | 'flag' }
+  | { winner: Side; reason: 'corner' | 'no-moves' | 'resign' | 'flag' | 'abandoned' }
   | { winner: null; reason: 'repetition' | 'move-limit' | 'agreed' | 'aborted' };
 
 export type GameEvent =

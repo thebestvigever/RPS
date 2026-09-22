@@ -26,6 +26,7 @@ import type {
   VariantConfig,
 } from '@sps/engine';
 import {
+  abandon,
   abortGame,
   agreeDraw,
   applyMove,
@@ -172,6 +173,32 @@ export function recipients(room: Room, audience: Audience): string[] {
 const errorOut = (id: string, code: ErrorCode, reason: string): Outbound =>
   to(id, { t: 'error', code, reason });
 
+/**
+ * How long the first move may take — Vig, 23 Sep 2026, settling the clock
+ * addendum's first open question ("a first-move time limit... worth having if
+ * online play arrives"). It has arrived.
+ *
+ * Thirty seconds, and then the game is `aborted` rather than lost: nobody has
+ * played anything yet, so there is no game to lose. It is the same half-minute
+ * lichess uses and it exists for the same reason — a match created and walked
+ * away from should not sit there holding somebody's evening.
+ */
+export const FIRST_MOVE_MS = 30_000;
+
+/**
+ * Claiming an absent opponent's game is a casual courtesy, not a rated rule —
+ * and only ever against somebody who was actually here. A seat waiting on an
+ * unopened invite link is not an opponent who walked away, so nothing counts
+ * against it and the room has no reason to wake up about it.
+ */
+function claimsAllowed(room: Room): boolean {
+  return (
+    room.state.mode === 'online-casual' &&
+    room.state.startedAt !== null &&
+    room.game.result === null
+  );
+}
+
 /** The clock as it stands: the last snapshot, one per move plus the start. */
 export function liveClock(state: RoomState): ClockState {
   const clock = state.clocks[state.clocks.length - 1];
@@ -272,7 +299,11 @@ export function nextWakeAt(room: Room, now: number): number | null {
   const flagAt = flagDeadline(liveClock(room.state), now);
   if (flagAt !== null) deadlines.push(flagAt);
 
-  if (room.state.mode === 'online-casual') {
+  if (room.state.startedAt !== null && room.game.ply === 0) {
+    deadlines.push(room.state.startedAt + FIRST_MOVE_MS);
+  }
+
+  if (claimsAllowed(room)) {
     for (const side of ['blue', 'red'] as const) {
       const at = claimableAt(room.state.away, side);
       if (at !== null) deadlines.push(at);
@@ -326,7 +357,11 @@ export function close(room: Room, id: string, now: number): Delivery {
   const away: AwaySince = { ...next.state.away, [side]: now };
   next = { ...next, state: { ...next.state, away } };
 
-  return { room: next, out: [all({ t: 'presence', ...presenceView(away) })], close: [] };
+  return {
+    room: next,
+    out: [all({ t: 'presence', ...presenceView(away, claimsAllowed(next), now) })],
+    close: [],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -386,11 +421,30 @@ function enforceFlag(room: Room, now: number): Delivery | null {
 }
 
 /**
- * The alarm. Nothing here is driven by a message: a clock falls whether or not
- * anyone is watching, which is exactly why the server owns it.
+ * Nobody played the first move in time, so there was never a game: `aborted`,
+ * which the addendum defines as "abandoned before it was a game; counts for
+ * nothing".
+ *
+ * Checked before the flag, and it is always the earlier of the two — the
+ * shortest control on offer is 1+0, so a clock cannot fall inside the first
+ * thirty seconds of it.
+ */
+function enforceFirstMove(room: Room, now: number): Delivery | null {
+  const startedAt = room.state.startedAt;
+  if (room.game.result || startedAt === null) return null;
+  if (room.game.ply > 0) return null;
+  if (now < startedAt + FIRST_MOVE_MS) return null;
+
+  return settle(room, abortGame(room.game), now);
+}
+
+/**
+ * The alarm. Nothing here is driven by a message: a clock falls, and a first
+ * move goes unplayed, whether or not anyone is watching. That is exactly why
+ * the server owns both.
  */
 export function wake(room: Room, now: number): Delivery {
-  return enforceFlag(room, now) ?? quiet(room);
+  return enforceFirstMove(room, now) ?? enforceFlag(room, now) ?? quiet(room);
 }
 
 // ---------------------------------------------------------------------------
@@ -486,10 +540,12 @@ export function receive(room: Room, id: string, raw: unknown, now: number): Deli
     };
   }
 
-  // Everything below is a player's to do, and a clock that has already fallen
-  // decides the game before any of it.
-  const flagged = enforceFlag(room1, now);
-  if (flagged) return flagged;
+  // Everything below is a player's to do, and a deadline that has already
+  // passed decides the game before any of it. The server's receipt time is the
+  // only honest timestamp in the system, so a move sent at 29.9 seconds and
+  // arriving at 30.1 is late — as it would be over the board.
+  const expired = enforceFirstMove(room1, now) ?? enforceFlag(room1, now);
+  if (expired) return expired;
 
   if (seen.seat === 'spectator') {
     return {
@@ -509,7 +565,9 @@ export function receive(room: Room, id: string, raw: unknown, now: number): Deli
     case 'abort':
       return abort(room1, id, now);
     case 'claim':
-      return claimWin(room1, id, side, now);
+      return claimAway(room1, id, side, 'win', now);
+    case 'claim-draw':
+      return claimAway(room1, id, side, 'draw', now);
     case 'gift':
       return gift(room1, id, side, now);
     case 'draw-offer':
@@ -543,13 +601,14 @@ function welcomeFor(room: Room, seat: SeatId, now: number): ServerMessage {
     you: seat,
     record: gameRecord(room),
     clocks: clocksView(liveClock(state), now),
-    presence: presenceView(state.away),
+    presence: presenceView(state.away, claimsAllowed(room), now),
     offer:
       pending && pending.kind !== 'rematch'
         ? { kind: pending.kind as 'draw' | 'takeback', by: pending.by }
         : null,
     names: { blue: state.seats.blue.name, red: state.seats.red.name },
     mode: state.mode,
+    startedAt: state.startedAt,
   };
 }
 
@@ -628,10 +687,14 @@ function hello(
   for (const caught of catchUp(next, message.lastPly, now)) out.push(to(id, caught));
 
   if (side !== null) {
-    out.push(others(id, { t: 'presence', ...presenceView(next.state.away) }));
+    out.push(
+      others(id, { t: 'presence', ...presenceView(next.state.away, claimsAllowed(next), now) }),
+    );
   }
   if (starting) {
-    out.push(others(id, { t: 'started', clocks: clocksView(liveClock(next.state), now) }));
+    out.push(
+      others(id, { t: 'started', clocks: clocksView(liveClock(next.state), now), startedAt: now }),
+    );
   }
 
   return { room: next, out, close };
@@ -755,17 +818,22 @@ function abort(room: Room, id: string, now: number): Delivery {
 }
 
 /**
- * Claim the win against someone who has been away sixty seconds (spec 13.2).
+ * Answer an opponent who has stopped being there: take the win, or take the
+ * draw. Both need them gone for sixty seconds (spec 13.2), and both are the
+ * player's to press — a win is claimed, never awarded.
  *
- * OPEN, for Vig: this records `resign` for the player who left, because that
- * is the nearest thing the result vocabulary has (spec 7.2, ADDENDUM-CLOCKS 2)
- * and inventing a reason code is a change to what a finished game says about
- * itself — user-facing, and so his call, not a guess made here. An `abandoned`
- * reason would be the honest word; the addendum's own precedent is that a
- * reader treats an unknown reason as "finished, cause unknown", so adding one
- * later costs a line in this function.
+ * The win is recorded as `abandoned`, not `resign` (Vig, 23 Sep 2026). A
+ * player whose wifi died did not resign, and a record that says they did is a
+ * record that lies about them. The draw is `agreed`: it is a real result, and
+ * the one player still there is the only one in a position to agree to it.
  */
-function claimWin(room: Room, id: string, side: Side, now: number): Delivery {
+function claimAway(
+  room: Room,
+  id: string,
+  side: Side,
+  take: 'win' | 'draw',
+  now: number,
+): Delivery {
   if (room.game.result) {
     return { room, out: [errorOut(id, 'not-allowed', 'the game is over')], close: [] };
   }
@@ -787,7 +855,11 @@ function claimWin(room: Room, id: string, side: Side, now: number): Delivery {
     };
   }
 
-  return settle(room, resign(room.game, other(side)), now);
+  return settle(
+    room,
+    take === 'win' ? abandon(room.game, other(side)) : agreeDraw(room.game),
+    now,
+  );
 }
 
 // ---------------------------------------------------------------------------

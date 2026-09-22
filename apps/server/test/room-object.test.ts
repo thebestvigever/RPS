@@ -136,11 +136,15 @@ describe('a match in a Durable Object', () => {
     const { state, room, blue, red } = await playing();
 
     await room.webSocketClose(red as unknown as WebSocket);
-    expect(blue.drain()).toContainEqual({ t: 'presence', blue: 'online', red: 'away' });
+    expect(blue.drain()).toContainEqual(
+      expect.objectContaining({ t: 'presence', blue: 'online', red: 'away' }),
+    );
 
     const red2 = await connect(state, room);
     await room.webSocketMessage(red2 as unknown as WebSocket, hello(TOKENS.red));
-    expect(blue.drain()).toContainEqual({ t: 'presence', blue: 'online', red: 'online' });
+    expect(blue.drain()).toContainEqual(
+      expect.objectContaining({ t: 'presence', blue: 'online', red: 'online' }),
+    );
 
     // And a third socket on the same token supersedes the second.
     const red3 = await connect(state, room);
@@ -159,9 +163,18 @@ describe('a match in a Durable Object', () => {
 
   it('ends the game itself when the alarm finds a fallen flag', async () => {
     const { state, room, blue, red } = await playing();
+    // The game has to have started properly, or the thirty-second first-move
+    // rule gets there first and aborts it.
+    await room.webSocketMessage(
+      blue as unknown as WebSocket,
+      JSON.stringify({ t: 'move', ply: 0, move: 'Pb5-b6' }),
+    );
+    blue.drain();
+    red.drain();
+
     const original = Date.now;
     try {
-      // Four minutes later: Blue's three are gone and nobody has moved.
+      // Four minutes later: Red's three are gone and nobody has moved again.
       Date.now = () => original() + 4 * 60_000;
       await room.alarm();
     } finally {
@@ -170,7 +183,7 @@ describe('a match in a Durable Object', () => {
 
     for (const socket of [blue, red]) {
       expect(socket.drain()).toContainEqual(
-        expect.objectContaining({ t: 'result', result: { winner: 'red', reason: 'flag' } }),
+        expect.objectContaining({ t: 'result', result: { winner: 'blue', reason: 'flag' } }),
       );
     }
     // Nothing left to wake up for.

@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { fischer } from '@sps/match';
-import { AWAY_CLAIM_MS, CLOSE, flagDeadline, liveClock, nextWakeAt } from '../src/index.js';
+import {
+  AWAY_CLAIM_MS,
+  CLOSE,
+  FIRST_MOVE_MS,
+  flagDeadline,
+  liveClock,
+  nextWakeAt,
+} from '../src/index.js';
 import { TOKENS, only, playMoves, seated } from './harness.js';
 
 const hello = (lastPly: number, token = TOKENS.red) => ({
@@ -15,17 +22,21 @@ describe('wifi dies', () => {
     const t = seated({ control: fischer(3, 2) });
     t.disconnect('red-1', 10_000);
 
-    expect(only(t.drain('blue-1'), 'presence')[0]).toEqual({
+    expect(only(t.drain('blue-1'), 'presence')[0]).toMatchObject({
       t: 'presence',
       blue: 'online',
       red: 'away',
+      // The other player is told when the button lights up, not left to time
+      // sixty seconds from whenever this message happened to arrive.
+      claimableAt: { blue: null, red: 10_000 + AWAY_CLAIM_MS },
     });
     // Spec 13.2: a disconnected player's clock keeps running. Blue is still on
     // the clock and nothing about Red leaving has paused it.
     expect(flagDeadline(liveClock(t.room.state), 10_000)).toBe(3 * 60_000);
-    // The room wakes at the earlier of the two things that can happen on their
-    // own — here, Red becoming claimable a minute from now.
-    expect(nextWakeAt(t.room, 10_000)).toBe(10_000 + AWAY_CLAIM_MS);
+    // The room wakes at the earliest of the things that can happen on their
+    // own. Nobody has moved yet, so that is the thirty-second first-move
+    // deadline, well before Red becomes claimable.
+    expect(nextWakeAt(t.room, 10_000)).toBe(FIRST_MOVE_MS);
   });
 
   it('carries on where it left off, with the moves that were missed', () => {
@@ -54,10 +65,11 @@ describe('wifi dies', () => {
     expect(caught[0]?.clocks.serverTime).toBe(6_000);
     expect(welcome?.clocks.serverTime).toBe(9_000);
 
-    expect(only(t.drain('blue-1'), 'presence')[0]).toEqual({
+    expect(only(t.drain('blue-1'), 'presence')[0]).toMatchObject({
       t: 'presence',
       blue: 'online',
       red: 'online',
+      claimableAt: { blue: null, red: null },
     });
   });
 
@@ -110,16 +122,55 @@ describe('walking away', () => {
     expect(t.room.game.result).toBe(null);
 
     t.send('blue-1', { t: 'claim' }, 10_000 + AWAY_CLAIM_MS);
+    // Not `resign`: a player whose wifi died did not resign, and a record
+    // that says they did is a record that lies about them.
     expect(only(t.drain('blue-1'), 'result')[0]?.result).toEqual({
       winner: 'blue',
-      reason: 'resign',
+      reason: 'abandoned',
     });
   });
 
   it('wakes the room when the claim becomes possible', () => {
     const t = seated();
+    playMoves(t, 2);
     t.disconnect('red-1', 10_000);
     expect(nextWakeAt(t.room, 10_000)).toBe(10_000 + AWAY_CLAIM_MS);
+  });
+
+  it('offers the draw as well as the win', () => {
+    const t = seated();
+    playMoves(t, 2);
+    t.disconnect('red-1', 10_000);
+    t.drain('blue-1');
+
+    t.send('blue-1', { t: 'claim-draw' }, 10_000 + AWAY_CLAIM_MS);
+    // A real result, unlike an abort: the one player still there is the only
+    // one in a position to agree to it.
+    expect(only(t.drain('blue-1'), 'result')[0]?.result).toEqual({
+      winner: null,
+      reason: 'agreed',
+    });
+  });
+
+  it('will not take a draw before the sixty seconds either', () => {
+    const t = seated();
+    playMoves(t, 2);
+    t.disconnect('red-1', 10_000);
+    t.send('blue-1', { t: 'claim-draw' }, 20_000);
+    expect(only(t.drain('blue-1'), 'error')[0]?.reason).toBe(
+      'your opponent has not been away long enough',
+    );
+    expect(t.room.game.result).toBe(null);
+  });
+
+  it('tells a rated game there is nothing to claim', () => {
+    const t = seated({ mode: 'rated' });
+    playMoves(t, 2);
+    t.disconnect('red-1', 10_000);
+    expect(only(t.drain('blue-1'), 'presence')[0]?.claimableAt).toEqual({
+      blue: null,
+      red: null,
+    });
   });
 
   it('is not a way out of a rated game', () => {
@@ -134,6 +185,7 @@ describe('walking away', () => {
 
   it('forgets the absence the moment the player is back', () => {
     const t = seated();
+    playMoves(t, 2);
     t.disconnect('red-1', 10_000);
     t.connect('red-2', 20_000);
     t.send('red-2', hello(0), 20_000);

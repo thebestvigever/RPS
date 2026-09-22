@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { UNLIMITED, createClock, delayed, fischer, startTurn } from '@sps/match';
-import { flagDeadline, gameRecord, liveClock, nextWakeAt } from '../src/index.js';
-import { only, playMoves, seated } from './harness.js';
+import { FIRST_MOVE_MS, flagDeadline, gameRecord, liveClock, nextWakeAt } from '../src/index.js';
+import { TOKENS, only, playMoves, seated, table } from './harness.js';
 
 const MINUTE = 60_000;
 
@@ -33,24 +33,28 @@ describe('when the flag falls', () => {
 describe('the room runs the clock', () => {
   it('knows when to wake, and ends the game when it does', () => {
     const t = seated({ control: fischer(1, 0) });
-    expect(nextWakeAt(t.room, 0)).toBe(60_000);
+    playMoves(t, 2);
+    // Blue used a second on move one, so their minute now runs out at 61s.
+    expect(nextWakeAt(t.room, 2_000)).toBe(61_000);
 
-    t.alarm(60_000);
+    t.alarm(61_000);
     const [result] = only(t.drain('red-1'), 'result');
     expect(result?.result).toEqual({ winner: 'red', reason: 'flag' });
     expect(result?.clocks.blue).toBe(0);
-    expect(nextWakeAt(t.room, 60_000)).toBe(null);
+    expect(nextWakeAt(t.room, 61_000)).toBe(null);
   });
 
   it('gives the flag to a move that arrives too late', () => {
     const t = seated({ control: fischer(1, 0) });
+    playMoves(t, 2);
+    t.drain('blue-1');
     // Blue plays a perfectly legal move — four seconds after their time ran out.
-    t.send('blue-1', { t: 'move', ply: 0, move: t.legal() }, 64_000);
+    t.send('blue-1', { t: 'move', ply: 2, move: t.legal() }, 66_000);
 
     const seen = t.drain('blue-1');
     expect(only(seen, 'moved')).toEqual([]);
     expect(only(seen, 'result')[0]?.result).toEqual({ winner: 'red', reason: 'flag' });
-    expect(t.room.state.moves).toEqual([]);
+    expect(t.room.state.moves).toHaveLength(2);
   });
 
   it('moves the wake-up on as each turn starts', () => {
@@ -83,6 +87,52 @@ describe('the room runs the clock', () => {
     expect(record.clock?.control).toBe('3+2');
     expect(record.clock?.remainingMs).toHaveLength(4);
     expect(record.clock?.gifts).toEqual([{ ply: 4, from: 'blue', to: 'red', ms: 15_000 }]);
+  });
+});
+
+describe('the first move', () => {
+  it('aborts a game nobody starts within thirty seconds', () => {
+    const t = seated();
+    expect(nextWakeAt(t.room, 0)).toBe(FIRST_MOVE_MS);
+
+    t.alarm(FIRST_MOVE_MS - 1);
+    expect(t.room.game.result).toBe(null);
+
+    t.alarm(FIRST_MOVE_MS);
+    // Aborted, not lost: nobody has played anything, so there is no game to
+    // lose (ADDENDUM-CLOCKS 2 — "counts for nothing").
+    expect(only(t.drain('blue-1'), 'result')[0]?.result).toEqual({
+      winner: null,
+      reason: 'aborted',
+    });
+  });
+
+  it('is late if it arrives late, whatever the sender thinks', () => {
+    const t = seated();
+    t.send('blue-1', { t: 'move', ply: 0, move: t.legal() }, FIRST_MOVE_MS + 100);
+
+    const seen = t.drain('blue-1');
+    expect(only(seen, 'moved')).toEqual([]);
+    expect(only(seen, 'result')[0]?.result).toEqual({ winner: null, reason: 'aborted' });
+  });
+
+  it('stops mattering the moment somebody moves', () => {
+    const t = seated();
+    playMoves(t, 1);
+    t.alarm(FIRST_MOVE_MS + 5_000);
+    expect(t.room.game.result).toBe(null);
+    expect(t.room.state.moves).toHaveLength(1);
+  });
+
+  it('does not start until the second player is there', () => {
+    // A match sitting on an unopened invite link has no clock of any kind
+    // running against it.
+    const t = table();
+    t.connect('blue-1');
+    t.send('blue-1', { t: 'hello', matchId: 'match-one', token: TOKENS.blue, lastPly: 0 }, 0);
+    t.alarm(FIRST_MOVE_MS + 60_000);
+    expect(t.room.game.result).toBe(null);
+    expect(nextWakeAt(t.room, 0)).toBe(null);
   });
 });
 
@@ -120,6 +170,9 @@ describe('giving time away', () => {
     const t = seated({ control: UNLIMITED });
     t.send('blue-1', { t: 'gift' }, 4_000);
     expect(only(t.drain('blue-1'), 'error')[0]?.reason).toBe('there is no clock to add to');
+    // An unlimited clock never falls, but the first move is still on a timer.
+    expect(nextWakeAt(t.room, 4_000)).toBe(FIRST_MOVE_MS);
+    playMoves(t, 1);
     expect(nextWakeAt(t.room, 4_000)).toBe(null);
   });
 });

@@ -11,6 +11,10 @@ import { PRESETS } from '@sps/match';
 import type { OnlineMode } from '@sps/referee';
 import { isMatchId } from '@sps/referee';
 
+// `CreatedMatch` and `MatchSummary` live in @sps/referee, beside the protocol:
+// the browser reads the same definition this writes.
+export type { CreatedMatch, MatchSummary } from '@sps/referee';
+
 export interface CreateMatch {
   variant: VariantId;
   control: TimeControl;
@@ -85,21 +89,6 @@ export function matchIdFrom(pathname: string, prefix: string): string | null {
   const rest = pathname.slice(prefix.length);
   const id = rest.split('/')[0] ?? '';
   return isMatchId(id) ? id : null;
-}
-
-export interface CreatedMatch {
-  matchId: string;
-  you: 'blue' | 'red';
-  /** The creator's own seat credential. Kept, not shared. */
-  token: string;
-  /** The link to send a friend. It carries the other seat, so it is the game. */
-  invite: string;
-  /** The same room with no seat attached. */
-  spectate: string;
-  socket: string;
-  variant: VariantId;
-  control: { id: string; name: string };
-  mode: OnlineMode;
 }
 
 export const CORS_HEADERS = {

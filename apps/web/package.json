@@ -15,6 +15,7 @@
     "@sps/board": "workspace:*",
     "@sps/engine": "workspace:*",
     "@sps/match": "workspace:*",
+    "@sps/referee": "workspace:*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

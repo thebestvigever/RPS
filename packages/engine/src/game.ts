@@ -209,6 +209,19 @@ export function flag(state: GameState, side: Side): GameState {
   return { ...state, result: { winner: other(side), reason: 'flag' } };
 }
 
+/**
+ * `side` stopped being there, and the opponent claimed the game.
+ *
+ * Like `flag`, the engine never decides this for itself: it has no notion of
+ * a connection, and the only thing that does is the room (docs/ONLINE.md).
+ * This exists so that the ending has a name of its own rather than borrowing
+ * `resign`, which would put words in the mouth of somebody whose wifi died.
+ */
+export function abandon(state: GameState, side: Side): GameState {
+  if (state.result) throw new IllegalMoveError('the game is over');
+  return { ...state, result: { winner: other(side), reason: 'abandoned' } };
+}
+
 /** Both players agreed a draw (2.9). */
 export function agreeDraw(state: GameState): GameState {
   if (state.result) throw new IllegalMoveError('the game is over');

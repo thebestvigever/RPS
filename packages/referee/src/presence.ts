@@ -22,9 +22,29 @@ export const AWAY_CLAIM_MS = 60_000;
 /** When each side went away, or null while they are connected. */
 export type AwaySince = Record<Side, number | null>;
 
-export function presenceView(away: AwaySince): PresenceView {
+/**
+ * What the other player is told, and when their button lights up.
+ *
+ * `claimableAt` is in server time and is what lets a client count down
+ * honestly rather than starting its own sixty seconds from whenever the
+ * message happened to arrive — which would be wrong by the whole of a
+ * reconnect. Rated games carry null, because there is nothing to claim.
+ */
+export function presenceView(
+  away: AwaySince,
+  claimable: boolean,
+  now: number,
+): PresenceView {
   const flag = (side: Side): PresenceFlag => (away[side] === null ? 'online' : 'away');
-  return { blue: flag('blue'), red: flag('red') };
+  const at = (side: Side): number | null =>
+    claimable ? claimableAt(away, side) : null;
+
+  return {
+    blue: flag('blue'),
+    red: flag('red'),
+    claimableAt: { blue: at('blue'), red: at('red') },
+    serverTime: now,
+  };
 }
 
 export function awayFor(away: AwaySince, side: Side, now: number): number {

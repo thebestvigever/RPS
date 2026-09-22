@@ -50,6 +50,15 @@ export interface ClocksView {
 export interface PresenceView {
   blue: PresenceFlag;
   red: PresenceFlag;
+  /**
+   * When each side's absence becomes claimable, in server time — null while
+   * they are here, and null in a rated game, where there is nothing to claim.
+   * Spec 13.2 sends only the two flags; a bare "away" leaves a client to start
+   * its own sixty seconds from whenever the message arrived, which is wrong by
+   * the whole of a reconnect.
+   */
+  claimableAt: { blue: number | null; red: number | null };
+  serverTime: number;
 }
 
 export type ClientMessage =
@@ -73,7 +82,9 @@ export type ClientMessage =
   /** Addendum 6: 15 seconds to the opponent, casual only. */
   | { t: 'gift' }
   /** Spec 13.2's "claim the win after 60 seconds away", which its list had no message for. */
-  | { t: 'claim' };
+  | { t: 'claim' }
+  /** The other half of a claim: take the draw instead of the win. */
+  | { t: 'claim-draw' };
 
 export type ErrorCode =
   | 'bad-message'
@@ -100,13 +111,21 @@ export type ServerMessage =
       names: Record<Side, string | null>;
       /** Which offers and gestures this match allows (spec 13.2 casual vs rated). */
       mode: string;
+      /**
+       * When both seats were taken, in server time, or null while a match is
+       * still waiting on its invite link. Added: without it a client cannot
+       * tell "my opponent has not arrived" from "my opponent has dropped out",
+       * and those are two completely different screens. It is also what the
+       * first-move countdown counts from.
+       */
+      startedAt: number | null;
     }
   /** Both seats are taken and the first clock is running. Added: 13.2 had no "the game began". */
-  | { t: 'started'; clocks: ClocksView }
+  | { t: 'started'; clocks: ClocksView; startedAt: number }
   | { t: 'moved'; ply: number; move: string; events: GameEvent[]; clocks: ClocksView }
   | { t: 'rejected'; ply: number; reason: string }
   | { t: 'result'; result: GameResult; clocks: ClocksView }
-  | { t: 'presence'; blue: PresenceFlag; red: PresenceFlag }
+  | ({ t: 'presence' } & PresenceView)
   | { t: 'draw-offered'; by: Side }
   | { t: 'draw-declined'; by: Side }
   | { t: 'draw-withdrawn'; by: Side }
@@ -196,6 +215,7 @@ const BARE_TYPES = new Set([
   'takeback-decline',
   'takeback-withdraw',
   'abort',
+  'claim-draw',
   'gift',
   'claim',
 ]);

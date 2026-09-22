@@ -57,6 +57,9 @@ importers:
       '@sps/match':
         specifier: workspace:*
         version: link:../../packages/match
+      '@sps/referee':
+        specifier: workspace:*
+        version: link:../../packages/referee
       react:
         specifier: ^18.3.1
         version: 18.3.1

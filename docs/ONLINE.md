@@ -1,6 +1,6 @@
 # Online play — the referee
 
-**Status:** built and tested; nothing in `apps/web` speaks to it yet.
+**Status:** built, tested, and playable from the app.
 **Covers:** Roadmap §2, spec §13.2.
 
 Two people in different places play by both connecting to the same room, and
@@ -15,6 +15,9 @@ is, what it says, and what it deliberately does not do yet.
 |---|---|
 | `packages/referee` | The whole of online play except the socket. Pure: it owns no connection, opens no storage and never asks what time it is. |
 | `apps/server` | The Cloudflare Worker and one Durable Object per match. Sockets, storage, alarms and routing — no rules. |
+| `apps/web/src/match-client.ts` | The browser's half, and the same split again: a reducer over the room's messages, tested with no socket and no DOM. |
+| `apps/web/src/useMatch.ts` | The socket, the reconnect and the outbox. Nothing else. |
+| `apps/web/src/Online.tsx` | The screens with no offline equivalent: waiting for a link to be opened, and the two buttons you get when your opponent stops being there. |
 
 The split is the same one the rest of the repo already makes, and it is the
 reason this was a small job rather than a rewrite:
@@ -78,6 +81,7 @@ naming a message.
 | `{ t: 'abort' }` | *added* — first two plies, then "resign instead" (addendum §9). |
 | `{ t: 'gift' }` | *added* — 15 seconds to the opponent (addendum §6). Casual only. |
 | `{ t: 'claim' }` | *added* — §13.2's "claim the win after 60 seconds away" had no message. |
+| `{ t: 'claim-draw' }` | *added* — the other half of a claim: take the draw instead. |
 
 ### Room → client
 
@@ -89,7 +93,7 @@ naming a message.
 | `{ t: 'result', result, clocks }` | |
 | `{ t: 'presence', blue, red }` | |
 | `{ t: 'draw-offered', by }` · `{ t: 'pong', serverTime, at }` | |
-| `{ t: 'started', clocks }` | *added* — both seats taken; the clock is running. |
+| `{ t: 'started', clocks, startedAt }` | *added* — both seats taken; the clock is running. |
 | `{ t: 'draw-declined' \| 'draw-withdrawn', by }` and the takeback equivalents | *added* |
 | `{ t: 'took-back', ply, clocks }` | *added* — the game is now `ply` plies long. |
 | `{ t: 'gifted', from, to, ms, clocks }` | *added* |
@@ -124,9 +128,16 @@ the face of a clock. **Display the view with the newest `serverTime`.**
   only honest timestamp in the system.
 * **A disconnected player's clock keeps running** (§13.2). Pausing it would
   make pulling the plug the cheapest way to think.
+* **Thirty seconds to play the first move**, or the game is `aborted` — not
+  lost: nobody has played anything, so there is no game to lose. The countdown
+  starts when the second player arrives, never before, so a match sitting on an
+  unopened link has nothing running against it.
 * **The win against someone who left is claimed, not awarded.** Sixty seconds,
-  casual games, and the player who stayed has to press the button. Somebody who
-  gets back at 61 seconds finds the game still there unless they were claimed.
+  casual games, and the player who stayed has to press the button — or takes
+  the draw instead. Somebody who gets back at 61 seconds finds the game still
+  there unless they were claimed. A claimed win is recorded as `abandoned`, a
+  result reason of its own: a player whose wifi died did not resign, and a
+  record that says they did is a record that lies about them.
 * **Rate limiting** per connection (§13.7), as a token bucket that nothing a
   person can do by playing will ever hit.
 
@@ -156,10 +167,14 @@ pnpm --filter @sps/server deploy   # wrangler deploy
 
 ## What it does not do yet
 
-* **`apps/web` does not speak to it.** No screen, no join page, no rematch
-  button. That is the next piece of work, not a gap in this one.
 * **Rematch.** The offer kind exists in `@sps/match`; a rematch needs a *new*
-  room, which is a routing question this deliberately left alone.
+  room, which is a routing question this deliberately left alone. The game-over
+  overlay's Rematch button leaves an online game rather than starting one.
+* **Takebacks have no button.** The protocol, the room and the offer policy
+  all support them in a casual game; the board simply hides Undo online rather
+  than offering to ask. Undoing by agreement is a real interface of its own.
+* **Time gifts have no button online** either, for the same reason: the room
+  takes `gift` and the courtesy is allowed in a casual game.
 * **Ratings and accounts** (spec §13.3), and therefore rated play is only a
   mode string today.
 * **Match-creation rate limiting is per isolate.** It stops the ordinary
@@ -168,18 +183,55 @@ pnpm --filter @sps/server deploy   # wrangler deploy
 * **Archival.** A finished game's record is kept in its own object, which is
   enough for spec §13.5's permanent page but is not one.
 
+## Playing it
+
+Home → **Play a friend** → a link to send. The first person to open it takes
+the other side and the game starts on its own.
+
+The board is the ordinary board: `Game.tsx` with an `online` prop, so the
+gestures, the aids, the animations, the sounds and the clock face are the same
+ones offline play has. A move is played locally and sent at the same instant,
+and the room's answer is what the position is rebuilt from — which is what
+makes an online move feel like an offline one on a connection with any latency
+at all. When the two disagree (a move that arrived after the flag, a takeback,
+a rejected ply) the room's list wins and the board is put back without asking.
+
+The room owns the clock, so the browser is told the time rather than keeping
+it. `clockFromServer` reads the room's view back as the `ClockState` the clock
+display already takes — which is why nothing about how a clock is drawn,
+warned about or read aloud needed a second version for online play. It is exact
+for every control the room accepts: those are all presets, and every preset is
+Fischer or none, where a turn costs exactly the time it takes.
+
+Two things the browser does NOT do: decide anything, and keep its own sixty
+seconds. The room sends the instant an absence becomes claimable rather than a
+countdown, because a client timing it from when the message arrived would be
+wrong by the whole of a reconnect.
+
+## Decided, 23 Sep 2026
+
+Vig settled two of the three questions this file opened with:
+
+1. **A claimed win is `abandoned`**, a new reason in the result vocabulary
+   (spec §7.2, `ADDENDUM-CLOCKS` §2). `rulesVersion` stays **1** — no rule of
+   play changed — and a reader that does not know the reason should treat it as
+   "finished, cause unknown" rather than throwing, exactly as the clock
+   addendum asked of `flag`. The draw a player can take instead is `agreed`:
+   it is a real result, and the one player still there is the only one in a
+   position to agree to it.
+2. **The first move gets thirty seconds**, which is the clock addendum's own
+   first open question ("worth having if online play arrives"). It has arrived.
+
 ## Open, for Vig
 
-1. **What a claimed win is called.** A player who walks away is recorded as
-   having resigned, because that is the nearest thing the result vocabulary has
-   (spec §7.2, addendum §2). `abandoned` would be the honest word, and adding it
-   is a change to what a finished game says about itself — user-facing, so his
-   call. The addendum's own rule that a reader treats an unknown reason as
-   "finished, cause unknown" is what makes adding it later cheap.
-2. **A first-move time limit.** Left open by the clock addendum, and explicitly
-   "worth having if online play arrives". It has now arrived. Lichess aborts a
-   game nobody has moved in within 30 seconds; today the room lets the first
-   player's own clock run instead, which is self-correcting but slower.
-3. **Whether rated play ships at all before accounts.** The mode exists and
+1. **Whether rated play ships at all before accounts.** The mode exists and
    turns off takebacks, time gifts and away-claims. Rating nobody is arguably
    worse than not offering it.
+2. **Whether players can name themselves online.** The protocol carries a name
+   and the record keeps it; there is no field to type one into, so every online
+   game currently reads Blue and Red. Pass-and-play has had name fields since
+   M5, and copying them here is small — it is a wording and layout call rather
+   than a technical one.
+3. **What a spectator link should be.** The room has always allowed one and
+   the server hands one back; nothing in the app offers it, and watching
+   currently shows the position without animating each move in.

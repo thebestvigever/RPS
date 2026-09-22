@@ -11,7 +11,7 @@ describe('joining by link', () => {
     const [welcome] = only(t.drain('blue-1'), 'welcome');
     expect(welcome?.you).toBe('blue');
     expect(welcome?.record.moves).toEqual([]);
-    expect(welcome?.presence).toEqual({ blue: 'online', red: 'away' });
+    expect(welcome?.presence).toMatchObject({ blue: 'online', red: 'away' });
     // Nothing ticks until there is somebody to play: a match waiting for its
     // second player is not yet a game.
     expect(welcome?.clocks.running).toBe(null);
@@ -32,7 +32,11 @@ describe('joining by link', () => {
     expect(welcome?.clocks.running).toBe('blue');
 
     const blueSaw = t.drain('blue-1');
-    expect(only(blueSaw, 'presence')[0]).toEqual({ t: 'presence', blue: 'online', red: 'online' });
+    expect(only(blueSaw, 'presence')[0]).toMatchObject({
+      t: 'presence',
+      blue: 'online',
+      red: 'online',
+    });
     expect(only(blueSaw, 'started')[0]?.clocks.running).toBe('blue');
     expect(t.room.state.startedAt).toBe(5_000);
   });
