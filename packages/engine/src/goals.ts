@@ -2,7 +2,7 @@
 // must reach i9, Red must reach a1, and in the 2x2 Corner variant each goal is a
 // block of four.
 
-import { parseSquare } from './board.js';
+import { SQUARE_COUNT, parseSquare } from './board.js';
 import type { Side, Square, VariantConfig } from './types.js';
 
 const cache = new WeakMap<VariantConfig, Record<Side, readonly Square[]>>();
@@ -23,8 +23,32 @@ export function goalSquares(variant: VariantConfig, side: Side): readonly Square
   return resolve(variant)[side];
 }
 
+/**
+ * 81-entry, 1 where that square is one of `side`'s goals — `isGoalSquare` is
+ * asked for every move under consideration (`winsNow`, docs/engine/04-SPEED.md
+ * §5), so this trades a `.includes()` scan (1 or 4 elements, but still a scan
+ * behind a `WeakMap` lookup) for a direct array index.
+ */
+const maskCache = new WeakMap<VariantConfig, Record<Side, Uint8Array>>();
+
+function goalMask(variant: VariantConfig): Record<Side, Uint8Array> {
+  const cached = maskCache.get(variant);
+  if (cached) return cached;
+
+  const squares = resolve(variant);
+  const mask: Record<Side, Uint8Array> = {
+    blue: new Uint8Array(SQUARE_COUNT),
+    red: new Uint8Array(SQUARE_COUNT),
+  };
+  for (const square of squares.blue) mask.blue[square] = 1;
+  for (const square of squares.red) mask.red[square] = 1;
+
+  maskCache.set(variant, mask);
+  return mask;
+}
+
 export function isGoalSquare(variant: VariantConfig, side: Side, square: Square): boolean {
-  return goalSquares(variant, side).includes(square);
+  return goalMask(variant)[side][square] === 1;
 }
 
 /**

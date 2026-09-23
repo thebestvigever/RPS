@@ -4,7 +4,7 @@
 // the fixtures and replays rely on. NEIGHBOURS is already ascending, and squares
 // are walked 0..80, so the order falls out of the loops.
 
-import { NEIGHBOURS, SQUARE_COUNT } from './board.js';
+import { NEIGHBOUR_FLAT, NEIGHBOUR_OFFSETS, SQUARE_COUNT } from './board.js';
 import { EMPTY, beats, decodePiece } from './pieces.js';
 import type { PieceLists } from './pieceList.js';
 import type { GameState, Move, Side, Square } from './types.js';
@@ -28,7 +28,9 @@ function pushMovesFrom(
   const piece = decodePiece(code)!;
   const beaten = beats(piece.type);
 
-  for (const to of NEIGHBOURS[from]!) {
+  const end = NEIGHBOUR_OFFSETS[from + 1]!;
+  for (let i = NEIGHBOUR_OFFSETS[from]!; i < end; i++) {
+    const to = NEIGHBOUR_FLAT[i]!;
     const targetCode = board[to]!;
 
     if (targetCode === EMPTY) {

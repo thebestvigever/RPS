@@ -31,6 +31,16 @@ describe('the cycle (spec 2.2)', () => {
       expect(predatorOf(type)).not.toBe(type);
     }
   });
+
+  it('satisfies predator(predator(t)) === beats(t) — the identity Terms 1 and 5 build on', () => {
+    // docs/engine/02-EVALUATION.md's one idea: a piece is defended by a
+    // friendly piece of the type it itself beats, because that type is
+    // exactly its own predator's predator. `defendersOf` and `exchangeOn`
+    // (packages/engine/src/analysis.ts) both assume this holds.
+    for (const type of PIECE_TYPES) {
+      expect(predatorOf(predatorOf(type))).toBe(beats(type));
+    }
+  });
 });
 
 describe('board encoding (spec 7.2)', () => {
