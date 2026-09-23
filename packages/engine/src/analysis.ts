@@ -4,8 +4,8 @@ import { NEIGHBOURS, SQUARE_COUNT, distance } from './board.js';
 import { tallySides } from './fen.js';
 import { goalSquares, homeSquares } from './goals.js';
 import { legalMoves } from './moves.js';
-import { EMPTY, decodePiece, other, predatorOf } from './pieces.js';
-import type { GameState, Owner, PieceType, Side, Square } from './types.js';
+import { EMPTY, beats, decodePiece, other, predatorOf } from './pieces.js';
+import type { GameState, Move, Owner, PieceType, Side, Square } from './types.js';
 
 /**
  * Which owner holds which types, as a 3x3 lookup. Built once per query so that
@@ -215,4 +215,126 @@ export function nearestRunner(state: GameState, side: Side): number {
     nearest = Math.min(nearest, distanceToGoal(state, square));
   }
   return nearest;
+}
+
+/**
+ * Which square holds that side's nearest runner — the race meter's "hovering
+ * highlights the runner" (10.5). Ties break on the lower square index, which
+ * is arbitrary but deterministic: two runners tied for nearest is a real
+ * position (the starting one has all ten), and the meter can only highlight
+ * one square at a time.
+ */
+export function nearestRunnerSquare(state: GameState, side: Side): Square | null {
+  let nearest = Infinity;
+  let runner: Square | null = null;
+  for (let square = 0; square < SQUARE_COUNT; square++) {
+    const code = state.board[square]!;
+    if (code === EMPTY) continue;
+    if (decodePiece(code)!.owner !== side) continue;
+    const d = distanceToGoal(state, square);
+    if (d < nearest) {
+      nearest = d;
+      runner = square;
+    }
+  }
+  return runner;
+}
+
+/**
+ * Adjacent squares holding a piece that beats the one on `square` — the
+ * incoming half of the threat-lines aid (10.5): "from adjacent enemy pieces
+ * that can capture it." Structural, not a function of whose turn it is: a
+ * piece standing next to its predator is a genuine threat whether the
+ * predator's side can act on it this instant or on its next turn, and both
+ * matter to the player deciding whether to leave a piece where it is.
+ *
+ * Ownership is the only legality check that belongs here. `to`-side capture
+ * rules (a neutral can't take the side using it, can't take another neutral)
+ * all collapse to "different owner, and that owner's type beats this one" —
+ * the same test `legalMoves` applies, just without needing whose move it is.
+ */
+export function threatenedBy(state: GameState, square: Square): Square[] {
+  assertSquare(square);
+  const code = state.board[square]!;
+  if (code === EMPTY) return [];
+  const piece = decodePiece(code)!;
+  const predator = predatorOf(piece.type);
+
+  const threats: Square[] = [];
+  for (const neighbour of NEIGHBOURS[square]!) {
+    const neighbourCode = state.board[neighbour]!;
+    if (neighbourCode === EMPTY) continue;
+    const attacker = decodePiece(neighbourCode)!;
+    if (attacker.owner === piece.owner) continue;
+    if (attacker.type === predator) threats.push(neighbour);
+  }
+  return threats;
+}
+
+/**
+ * Adjacent squares holding a FRIENDLY piece that would recapture on `square`
+ * if its occupant were just captured — the defence half of the threat-lines
+ * picture, and the fact `02-EVALUATION.md`'s threat term is built on.
+ *
+ * By the cycle identity `predator(predator(t)) === beats(t)`
+ * (docs/engine/02-EVALUATION.md): a piece is guarded by a friendly piece of
+ * the type it itself beats. Your Scissors are guarded by your Paper, your
+ * Paper by your Rock, your Rock by your Scissors — because whatever attacks
+ * your Rock must be Paper, and Scissors is exactly what beats Paper back.
+ * Structural, like `threatenedBy`: not a function of whose turn it is.
+ */
+export function defendersOf(state: GameState, square: Square): Square[] {
+  assertSquare(square);
+  const code = state.board[square]!;
+  if (code === EMPTY) return [];
+  const piece = decodePiece(code)!;
+  const guard = beats(piece.type);
+
+  const defenders: Square[] = [];
+  for (const neighbour of NEIGHBOURS[square]!) {
+    const neighbourCode = state.board[neighbour]!;
+    if (neighbourCode === EMPTY) continue;
+    const friend = decodePiece(neighbourCode)!;
+    if (friend.owner !== piece.owner) continue;
+    if (friend.type === guard) defenders.push(neighbour);
+  }
+  return defenders;
+}
+
+/**
+ * Adjacent squares this piece could capture — the outgoing half of the
+ * threat-lines aid (10.5): "arrows to adjacent enemy pieces it can capture
+ * now." A normal piece's own captures don't depend on whose turn it is —
+ * ownership and type are the only tests `legalMoves` itself applies to them.
+ * A neutral is the one case that does: 4.2.3 says it can't take the side
+ * using it, and "using it" only means something for the side to move, so a
+ * hovered or selected neutral is read as though `state.turn` were the one
+ * using it — the only side that actually could, right now. The probe swap
+ * below only ever fires for that case, or for looking at the OPPONENT's own
+ * piece (hovering it asks "what would this capture on its turn").
+ */
+export function capturesFrom(state: GameState, square: Square): Square[] {
+  assertSquare(square);
+  const code = state.board[square]!;
+  if (code === EMPTY) return [];
+  const piece = decodePiece(code)!;
+  const mover = piece.owner === 'neutral' ? state.turn : piece.owner;
+  const probe = mover === state.turn ? state : { ...state, turn: mover };
+  return legalMoves(probe)
+    .filter((move) => move.from === square && move.captured != null)
+    .map((move) => move.to);
+}
+
+/**
+ * Would `square` be threatened after `move` is played — the danger-marks aid
+ * (10.5): a warning on a destination where the moving piece could be taken
+ * right back. Plays the move on a scratch board (never touching `state`) and
+ * asks `threatenedBy` of the piece's new square; a move that wins the game
+ * outright has nothing left to threaten it.
+ */
+export function dangerAfter(state: GameState, move: Move): boolean {
+  const board = Int8Array.from(state.board);
+  board[move.to] = board[move.from]!;
+  board[move.from] = EMPTY;
+  return threatenedBy({ ...state, board }, move.to).length > 0;
 }

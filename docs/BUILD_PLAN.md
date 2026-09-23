@@ -17,10 +17,243 @@ the previous milestone's "done when" holds.**
 | M4 | Play against the computer: worker, three levels, undo | Hard stays inside its time budget on a phone | **done** |
 | M4b | Board orientation, and the four cuts it was blocking: side picker, corner-anchored panels, move list + game-over overlay, Undo's clock refund | Playable as Red; §10.7's four buttons all work; Undo puts both clocks back | **done** |
 | M5 | 2×2 Corner and Neutrals, and the variant picker | All three variants playable both ways | **done** |
-| M6 | Information aids (§10.5) | Each aid on and off, correct in the fixture positions | |
-| M7 | How to play and the tutorial | A new player finishes all six puzzles | |
-| M8 | Sound, animation, accessibility, persistence; the clock's replay in review | §11.6 passes | review and share links landed early with M4b |
+| M6 | Information aids (§10.5) | Each aid on and off, correct in the fixture positions | **built** |
+| M7 | How to play and the tutorial | A new player finishes all six puzzles | **the tutorial is built; "How to play" is not — see below** |
+| M8 | Sound, animation, accessibility, persistence; the clock's replay in review | §11.6 passes | **sound, resume-after-reload and local stats are built; animation landed earlier (M3b/M4b); the accessibility pass and review's clock replay are partial — see below** |
 | M9 | Release | §11.7 fully ticked; deployed | |
+
+## What M6 left behind
+
+Five of spec 10.5's six aids: threat lines, the race meter, permanent-piece
+shields, the Keep lock, and danger marks. Type counts already shipped with
+M3b/M5. **Not built: the Hint button** (§9.5) — it needs its own request to
+the AI worker (a Medium-strength suggestion, independent of the opponent's
+own level), and that plumbing is its own piece of work rather than a render
+option.
+
+**The engine needed almost nothing new**, which is the "variants are data"/
+"the engine is pure" discipline (CLAUDE.md) paying off a second time: `isSealed`,
+`isPermanent`/`permanentMask`, `distanceToGoal`/`nearestRunner` already existed
+for the AI's own evaluation (M2) and the Keep (M1). Two genuinely new pure
+functions in `packages/engine/src/analysis.ts`:
+
+* **`threatenedBy(state, square)`** — the adjacent squares holding a piece
+  that beats the one on `square`. Deliberately structural rather than a
+  function of whose turn it is: a piece standing next to its predator is a
+  real thing to know about whether it's your move or theirs, and computing it
+  by swapping `state.turn` and re-running `legalMoves` would have made
+  "captures now" (this piece's own turn) and "captured by" (the threat
+  against it) look like two different kinds of fact when they're the same
+  adjacency-plus-type check from two directions.
+* **`dangerAfter(state, move)`** — plays a candidate move on a scratch board
+  (never touching `state`) and asks `threatenedBy` of the piece's new square.
+  This is the danger-marks aid: which of a selected piece's own legal
+  destinations leave it next to its predator.
+
+**Vig's call on spec 14.5** (BUILD_PLAN's own open question, "aids at every
+level or let strong players find them?"): no aids at Hard, not just the hint
+§9.5 already restricted. `visibleAids` in `packages/match/src/settings.ts`
+grew a second override, `HARD_AIDS`, identical in shape to Zen's `ZEN_AIDS`
+and composing with it the same way — either one hiding an aid is enough, and
+type counts survive both for the reason Zen's own comment already gives: they
+report the position, they don't advise on it.
+
+**Threat lines now cover hover too** (added after the first pass above,
+following Vig's own read of "selected or hovered"). `Game.tsx` grew
+`hoverSquare` state from `onPointerMove`/`onPointerLeave`, gated to
+`pointerType === 'mouse'` — touch fires the same pointer events on tap with
+no matching "leave," which would otherwise leave a highlight and a set of
+arrows stuck on whatever was touched last. Hover wins over selection while
+it's active (moving the mouse onto a different piece should show THAT
+piece's arrows, not the selected one's), falling back to the selected piece
+once the pointer leaves the board.
+
+This is also why `capturesFrom(state, square)` exists in
+`packages/engine/src/analysis.ts` now, alongside `threatenedBy`: the old
+"capturing" arrows were a `legal`-list filter, which only ever has moves for
+the side to move — fine for a selected piece (always yours, or a usable
+neutral), wrong for hovering the OPPONENT's own piece, which `legal` says
+nothing about. `capturesFrom` reads a normal piece's captures structurally,
+the same as `threatenedBy`, and only swaps `state.turn` in a probe for the
+one case that genuinely needs a turn to mean anything: a neutral, which
+can't take the side using it (4.2.3), so it's read as though `state.turn`
+were the one using it — the only side that actually could, right now.
+
+**The hover highlight itself is a new theme token**, `HOVER_TINT_ALPHA`
+(0.07, versus the last-move tint's 0.10) — deliberately lighter, so the two
+never read as the same kind of mark. Legal-move dots stay selection-only:
+`selection` in `Game.tsx` is still driven purely by the clicked `selected`
+square, untouched by hover, which is the literal reading of "no need to show
+other non-capture moves on hover."
+
+**The permanent-piece consequence sentence gates on the engine's own
+`isPermanent`, not the zero count alone.** `permanentPieceText`'s own doc
+comment in `packages/board/src/text.ts` says why: a surviving neutral of the
+predator type can keep a piece capturable even after both sides' own count of
+it reaches zero, and the spec's own example sentence doesn't hold in that
+case.
+
+**Settings now exists** (`apps/web/src/Settings.tsx`, reached from a new Home
+button) — closing the gap `docs/VISUAL_SYSTEM.md` 10 recorded, at least for
+what's actually wired to something. It exposes the six real aids and
+`coordinates` (which turned out to be unwired into `renderBoard` at all until
+this pass — a one-line fix once noticed) plus the theme picker for the three
+themes M3a already built and validated. **Deliberately not exposed**, per
+VISUAL_SYSTEM.md 11.4's own rule ("a permanently disabled control ... is
+noise; ship it when it works"): Hint (nothing computes a suggestion yet),
+family (only Cut stone is built), `confirmMoves`/`flipEachTurn` (declared in
+`DisplaySettings` but not read anywhere in `Game.tsx` either — same
+unwired state `coordinates` was in). Zen and sound aren't repeated here;
+they already have their own control in the game bar, and a second switch for
+the same one thing is a worse interface, not a more complete one.
+
+Theme is its own `localStorage` key (`sps.theme.v1`), not folded into
+`DisplaySettings` — VISUAL_SYSTEM.md 7's split between what the game *shows*
+(tested, shared-server-readable) and what it *looks like* (local, never
+sent) is a real distinction `packages/match`'s `DisplaySettings` would
+otherwise blur.
+
+**Verified by playing it.** Pass-and-play in the real app: a blue Scissors
+walked into range of a red Paper, selecting it drew the exact outgoing arrow
+in Blue's own colour to the Paper's square (checked in the DOM, not just
+visually), and completing that exact move produced "Blue Scissors captures
+Red Paper on g6" — the threat line predicted the position correctly. A Hard
+computer game showed zero `.panel-aid` lines and two `.panel-counts` (one per
+side), confirming `HARD_AIDS` reaches the panels, not only the board.
+**Not separately re-verified in the browser:** a genuine permanent-piece
+shield or a sealed Keep lock, both of which need several more captures than
+this pass drove by hand — covered instead by `render.test.ts`'s and
+`rules.test.ts`'s fixture-position tests, the same "engine fixtures, not a
+hand-picked sample" gate M3a's render tests already use.
+
+Hover and Settings, checked the same session: dispatching a real
+`pointermove` over an occupied square produced an `.aid-hover` rect and a
+(correctly empty, at the opening position) `.aid-threats` group, with zero
+stroked rects anywhere — no selection ring, no legal dots, confirming hover
+never draws what only a click should. Hovering an *empty* square still drew
+the highlight but no `.aid-threats` element at all (not an empty one — the
+layer is omitted outright). In Settings, unchecking "Race meter" and
+picking Signal both took effect immediately on Home's next game: the
+opponent's panel lost its `.panel-aid` line, and the board rendered in
+Signal's actual palette rather than Field Notes.
+
+## What M7 and M8 left behind (Workstream 2: tutorial, persistence, sound, accessibility)
+
+Built in parallel with M6 above, not after it — this repo had two sessions
+editing `apps/web` and `packages/engine` at the same time. Nothing here
+depended on M6 landing first, so the two proceeded concurrently rather than
+waiting on the strict milestone order CLAUDE.md otherwise asks for; worth
+knowing if a future change assumes M6 was a hard gate.
+
+**The tutorial (M7's own gate).** `apps/web/src/Tutorial.tsx`, a new screen
+reached from a button on Home. The six positions move from
+`packages/engine/test/fixtures/tutorial.json` (a test-only fixture) to
+`packages/engine/src/data/tutorial.json` plus a typed `TUTORIAL_PUZZLES`
+export in `tutorial.ts` — shipped data now, the same pattern `variants.ts`
+already uses, rather than a production screen reading out of `test/`. Both
+places that used to import the JSON fixture directly (`fixtures.test.ts`,
+`render.test.ts`) now point at the new path; nothing about what they check
+changed.
+
+* **Judging an attempt, not re-running Game.tsx's whole state machine.** A
+  puzzle has one to three pieces a side and exactly one correct move (or, for
+  puzzle 1, any of eight) — the real job is comparing the played move's own
+  notation (`moveToText`) against the puzzle's `solution`, not replaying
+  clocks, offers, undo or review. Click, drag and keyboard still share
+  `resolveClick`/`resolveDestination`, same split as `Game.tsx`, for the same
+  reason: two input methods that can silently disagree is exactly the kind of
+  bug a tutorial would then teach.
+* **Puzzle 6's line plays itself.** The only multi-ply puzzle scripts the
+  reply (`Sc3-b2`) on a short delay after the player's first move, then hands
+  the board back for the winning move — verified end to end in the browser,
+  including the auto-reply actually landing before "Your move." reappears.
+* **A wrong-but-legal attempt doesn't move the board.** Tapping a legal
+  destination that isn't the puzzle's answer shows the puzzle's own note (or,
+  for an actually illegal target, `@sps/board`'s `illegalCaptureReason`, the
+  same text `Game.tsx` uses) and leaves the position untouched — checked by
+  hand on puzzle 2: attempting `Re5xd6` answers "Paper beats Rock" and keeps
+  the piece selected without applying anything, then playing `Re5xf6` solves
+  it normally.
+* **Not built: "How to play"** (spec 10.1's other new screen, three
+  illustrated rules plus a card per variant). The task this pass was scoped
+  to named the tutorial specifically; a static rules page is real, separate
+  work rather than a two-line addition to this file.
+
+**Persistence (spec 10.13).** `apps/web/src/storage.ts` — settings, local
+stats, the in-progress game and tutorial progress, each wrapped in
+`try`/`catch` and each falling back to a working default when
+`localStorage` throws or doesn't exist (both halves are unit-tested:
+`storage.test.ts` runs the fallback path for real, since Vitest's own Node
+environment has no `localStorage` at all, and separately swaps in an
+in-memory `Storage` to check the round trip).
+
+* **Resume-after-reload replays the same `rewind`/`startTurn` Undo already
+  uses**, not a second reconstruction. `Game.tsx` grew `resumeClock` (a
+  `ClockStack`) alongside the `initialMoves` prop review already had;
+  `App.tsx` reads `sps.game.v1` once at startup — after a shared link, before
+  Home — and, if it finds an unfinished game, opens straight into it.
+  Verified in the browser: reloading a game already in the position, not on
+  Home, with no separate "continue?" step to click through first.
+* **A finished game is never left resumable.** `Game.tsx` reports its own
+  `history`/`clockStack`/`result` upward through one `onProgress` callback,
+  fired after every move and once more when a result lands; `App.tsx` is the
+  only thing that touches `localStorage`, so `Game.tsx` stays exactly as pure
+  of persistence as it was of clocks before C1.
+* **Local stats are scoped to vs-computer only** (`apps/web/src/stats.ts`'s
+  own header explains why): spec 10.7 says "per variant and difficulty",
+  which only means something where there's a difficulty, and pass-and-play
+  has no fixed "you" to keep a win streak for — tracking it per side instead
+  would be a different, unasked-for feature. `GameOver.tsx`'s own comment,
+  written when M4b shipped the rest of the overlay, called this out as
+  explicitly not implemented; it now renders "3W 1L 0D · 2-win streak" under
+  the extinction line, sourced from `App.tsx` and passed straight through.
+  Confirmed in the browser: Home's own "Your record at Medium, Original"
+  line updates from `0W 0L 0D` as the picker changes, before any game is
+  even played.
+* **Zen's persistence finally landed too** — it was session-only since C2
+  ("persisting it is M8's `localStorage` work", that file's own comment —
+  now true. The sound mute (below) is stored the same way, in the same
+  `DisplaySettings` blob `packages/match/src/settings.ts` already defined for
+  the aids M6 just wired up; this pass only ever reads and writes the two
+  fields it actually uses (`zen`, `sound`), not a Settings screen for the
+  rest of `Aids` — that's still M6/M8's shared "no Settings screen" gap.
+
+**Sound (spec 10.12).** `apps/web/src/sound.ts` — three short tones from the
+Web Audio API, not a shipped audio file: nothing here needed drawing
+correctly the way borrowed or licensed audio would (CLAUDE.md's "original
+work only" isn't just about art), and there's nothing for a bundler to
+fetch. A tick or thud plays from inside `doMove`, which both the human's tap
+and the computer's reply already go through (M4's own reasoning for reusing
+one function); the chime is separate, keyed off `gameState.result` turning
+non-null rather than sprinkled into resign/abort/flag/draw individually, so
+every way a game can end plays it once. The mute toggle sits in the control
+bar next to Zen's, styled the same way (`.sound--off` mirrors `.zen--on`),
+because there's no Settings screen for it to live in instead.
+
+**Accessibility (spec 10.10) — a partial pass, not a full one.** Keyboard
+play, the visible focus ring, `prefers-reduced-motion` and WCAG AA text
+contrast were already in place before this workstream (M3b, M4b, and the
+accent-contrast gate). What was actually missing: spec 10.10's own example,
+"the board is exposed as a grid of labelled cells (`e5, Blue Scissors`)".
+`@sps/board`'s SVG board is one `role="img"` (M3a), not a grid of focusable
+cells, and turning it into one is a real rendering-semantics change to a
+package with its own pinned tests — more than an accessibility *pass*
+inside a self-contained web-app change. What shipped instead:
+`apps/web/src/describe-square.ts`, a small shared helper `Game.tsx` and
+`Tutorial.tsx` both use to narrate whichever square the keyboard cursor is
+actually on, through a visually-hidden `aria-live` region the board is
+`aria-describedby`. It delivers the functional intent — a screen-reader
+user driving the keyboard hears what's on each square as they move — without
+the ARIA-grid rework. **Left for whoever picks this up next:** an actual
+`role="grid"`/`role="gridcell"` structure, if the cell-by-cell semantics
+turn out to matter beyond what the live region already gives.
+
+**Not built, and not pretended:** "How to play" (above), a Settings screen
+for anything beyond Zen and sound, and review's clock replay — the
+"not done" item M4b's own section already named and BUILD_PLAN's M8 row
+still lists. Nothing in this pass needed it, and reconstructing a
+`ClockStack` from a `GameClockRecord` for a read-only view is its own
+well-scoped piece of work rather than a corner of this one.
 
 ## What M5 left behind
 

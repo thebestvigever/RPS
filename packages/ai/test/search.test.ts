@@ -2,10 +2,15 @@ import { describe, expect, it } from 'vitest';
 import {
   applyMove,
   createGame,
+  decodePiece,
+  defendersOf,
+  EMPTY,
   fromFen,
   getVariant,
   legalMoves,
   moveToText,
+  SQUARE_COUNT,
+  threatenedBy,
   toFen,
   VARIANT_IDS,
   VARIANTS,
@@ -219,4 +224,56 @@ describe('quiescence (spec 9.1)', () => {
       expect(moveToText(state, chooseMove(state, level, 13).move)).toBe('Rd4xc3');
     }
   });
+});
+
+describe('defence (docs/engine/01-DIAGNOSIS.md)', () => {
+  /** Squares holding one of `side`'s own pieces that is attacked with no
+   *  defender — the same "hanging" definition the diagnosis measured with,
+   *  and the one `evaluate`/`quiesce` now use. */
+  function hangingSquares(state: GameState, side: Side): number[] {
+    const squares: number[] = [];
+    for (let square = 0; square < SQUARE_COUNT; square++) {
+      const code = state.board[square]!;
+      if (code === EMPTY) continue;
+      if (decodePiece(code)!.owner !== side) continue;
+      if (threatenedBy(state, square).length === 0) continue;
+      if (defendersOf(state, square).length > 0) continue;
+      squares.push(square);
+    }
+    return squares;
+  }
+
+  // Deliberately NOT a self-play statistical test. An earlier version of this
+  // test played full self-play games and asserted an aggregate hanging rate —
+  // it cost 8+ minutes (Hard's own 1.2s/move budget, times many plies, times
+  // several games) and, worse, an A/B run against the pre-fix code on a real
+  // sample found the self-play hanging rate barely moved (14.7% -> 16.7% at
+  // Hard, n=150, well inside noise for that sample size). Self-play isn't a
+  // clean probe for this specific claim: the fix makes BOTH sides of the
+  // mirror match smarter at once, so the raw "how often does a move leave
+  // something hanging" rate doesn't have to fall even when the underlying
+  // play is genuinely better — and `pnpm sim` says it is: shorter, more
+  // decisive, more balanced games (docs/engine/02-EVALUATION.md's status
+  // note has the numbers). What a fast, deterministic test CAN check
+  // directly is the mechanism itself.
+  it.each(['medium', 'hard'] as const)(
+    '%s walks an already-hanging piece to safety rather than ignoring it',
+    (level) => {
+      // Blue's move. The Paper on e5 is attacked by Red's Scissors on e6 and
+      // has no defender: d4, e4 and f4 escape it; d5, d6, f5 and f6 stay
+      // adjacent to e6 and don't. Blue's Rock on a5 is the "ignore it, do
+      // something else" alternative — five legal moves, none of which matter.
+      // Red's spare Paper on i1 is load-bearing, not decoration: without it,
+      // Blue's Rock has no predator anywhere on the board and is already
+      // permanent (2.10) — Hard then correctly ignores the Paper to start
+      // marching that Rock home and seal the Keep instead (+3000, dwarfing
+      // one Paper), which is the right move, not a bug. An earlier version
+      // of this test missed that and "failed" on exactly that false alarm.
+      const state = load('9/9/9/4S4/r3p4/9/9/9/8P blue');
+      const { move } = chooseMove(state, level, 21);
+      const after = applyMove(state, move).state;
+
+      expect(hangingSquares(after, 'blue')).toEqual([]);
+    },
+  );
 });

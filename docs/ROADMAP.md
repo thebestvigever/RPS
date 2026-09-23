@@ -177,6 +177,12 @@ when there is evidence people want it, not before. Step 2 will tell you.
 
 ## 4. A stronger engine
 
+> **`docs/engine/` is the worked-out version of this section** — what is
+> actually wrong with the current opponent (measured, not guessed), and the plan
+> to fix it. Short version: the evaluation cannot see a threat at all, which is
+> why Hard hangs a piece on a third of its moves and why more search depth does
+> not help. Start at `docs/engine/README.md`.
+
 The game already has one. The gap between it and Stockfish is worth
 understanding, because most of it is not where people expect.
 

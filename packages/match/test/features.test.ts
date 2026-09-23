@@ -160,6 +160,30 @@ describe('Zen mode', () => {
   });
 });
 
+describe('Hard hides every aid but the counts (spec 14.5)', () => {
+  it('is on by default — no hard-opponent flag, nothing hidden', () => {
+    expect(visibleAids(DEFAULT_SETTINGS).threatLines).toBe(true);
+  });
+
+  it('hides every aid except the type counts against a Hard computer', () => {
+    const hard = visibleAids(DEFAULT_SETTINGS, true);
+    expect(hard.typeCounts).toBe(true);
+    const { typeCounts: _counts, ...advice } = hard;
+    expect(Object.values(advice).some(Boolean)).toBe(false);
+  });
+
+  it('never turns an aid back on that the player had switched off', () => {
+    const noCounts = { ...DEFAULT_SETTINGS, aids: { ...DEFAULT_SETTINGS.aids, typeCounts: false } };
+    expect(visibleAids(noCounts, true).typeCounts).toBe(false);
+  });
+
+  it('composes with Zen — either one hiding an aid is enough', () => {
+    const zenAndHard = visibleAids({ ...DEFAULT_SETTINGS, zen: true }, true);
+    expect(zenAndHard.typeCounts).toBe(true);
+    expect(zenAndHard.threatLines).toBe(false);
+  });
+});
+
 describe('modes agree on what they allow', () => {
   it('covers every mode', () => {
     const modes: MatchMode[] = ['pass-and-play', 'vs-computer', 'online-casual', 'rated'];

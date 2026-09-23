@@ -18,21 +18,31 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  PIECE_TYPES,
   SHARE_PREFIX,
   abortGame,
   agreeDraw,
   applyMove,
+  beats,
+  capturesFrom,
+  dangerAfter,
   decodePiece,
   distance,
+  EMPTY,
   encodeRecord,
   flag as engineFlag,
+  isPermanent,
+  isSealed,
   legalMoves,
   moveToText,
+  nearestRunner,
   other,
   parseMove,
+  permanentMask,
   replay,
   resign as engineResign,
   summarise,
+  threatenedBy,
   toFen,
   typeCounts,
 } from '@sps/engine';
@@ -43,15 +53,19 @@ import {
   THEMES,
   captureMotion,
   illegalCaptureReason,
+  keepLockText,
   neutralSelectionText,
   displayCell,
+  permanentPieceText,
   pieceTypeName,
+  raceMeterText,
   renderBoard,
   renderPieceSample,
   sideName,
 } from '@sps/board';
-import type { Appearance, FamilyId, MotionKind, Orientation, SideNames, ThemeId } from '@sps/board';
+import type { Appearance, FamilyId, MotionKind, Orientation, SideNames, ThemeId, ThreatOverlay } from '@sps/board';
 import {
+  DEFAULT_SETTINGS,
   GIFT_POLICIES,
   OFFER_POLICIES,
   canAbort,
@@ -73,14 +87,18 @@ import {
   startTurn,
   stop as stopClock,
   urgencyOf,
+  visibleAids,
 } from '@sps/match';
-import type { ClockState, MatchMode, OfferState, TimeControl, Urgency } from '@sps/match';
+import type { Aids, ClockStack, ClockState, MatchMode, OfferState, TimeControl, Urgency } from '@sps/match';
 import { shouldAcceptDraw } from '@sps/ai';
 import type { FromWorker, Level, ToWorker } from '@sps/ai';
 import { clampSquare, slideOffsetPx, squareAt } from './board-geometry.js';
 import { describeResult, describeTurn, fullMoveOf, whoseTurn } from './announce.js';
 import { formatClock } from './clock-format.js';
+import { describeSquare } from './describe-square.js';
 import { createAiWorker } from './ai-worker.js';
+import { playCapture, playChime, playTick } from './sound.js';
+import type { VariantStats } from './stats.js';
 import MoveList from './MoveList.js';
 import GameOver from './GameOver.js';
 import './game.css';
@@ -88,6 +106,44 @@ import './game.css';
 export interface Computer {
   side: Side;
   level: Level;
+}
+
+/**
+ * Playing somebody else, through the room (docs/ONLINE.md).
+ *
+ * The room is the authority, and this component is not — but it still owns
+ * the board, because the alternative is a second board that behaves almost
+ * like this one. So a move is played HERE first, drawn and announced and
+ * sounded exactly as an offline move is, and sent at the same instant; the
+ * room's answer arrives a moment later and `moves` is what the position is
+ * rebuilt from. The two agree essentially always, because the check the room
+ * runs is the same `legalMoves` this component already ran. When they do not
+ * — a move that arrived after the flag, a takeback, a rejected ply — the
+ * room's list wins and the board is put back without asking.
+ *
+ * That is optimistic, and it is the reason an online move feels the same as
+ * an offline one on a connection with any latency at all.
+ */
+export interface OnlineControl {
+  /** Which side this browser plays. */
+  you: Side;
+  mode: MatchMode;
+  /** The room's move list. The only version of the game that counts. */
+  moves: readonly string[];
+  /** The room's result — a resignation leaves no trace in the moves. */
+  result: GameResult | null;
+  /** The room's clocks, already read as a `ClockState` (match-client.ts). */
+  clock: ClockState | null;
+  /** A pending offer as the room sees it, which survives a reconnect. */
+  offer: { kind: 'draw' | 'takeback'; by: Side } | null;
+  send: {
+    move: (ply: number, move: string) => void;
+    resign: () => void;
+    abort: () => void;
+    offerDraw: () => void;
+    acceptDraw: () => void;
+    declineDraw: () => void;
+  };
 }
 
 function randomSeed(): number {
@@ -128,12 +184,44 @@ export interface GameProps {
    */
   zen?: boolean;
   onToggleZen?: () => void;
+  /** The mute toggle spec 10.12 asks to be remembered — App.tsx owns the persistence, same split as Zen. */
+  sound?: boolean;
+  onToggleSound?: () => void;
+  /**
+   * The player's own aid choices (spec 10.5, 10.13) — Settings' per-aid
+   * toggles, before Zen or a Hard computer quiet any of them further.
+   * Defaults to every aid on, matching `DEFAULT_SETTINGS.aids`, so a caller
+   * that hasn't wired Settings yet (a shared review link, say) still shows
+   * the full aid layer rather than none of it.
+   */
+  aids?: Aids;
+  /** Spec 10.2/10.13's coordinate labels. Default true, matching `renderBoard`'s own default. */
+  coordinates?: boolean;
   /**
    * Pass-and-play's optional player names (Home's name fields), keyed by
    * side. Blank or missing falls back to the colour name — this is wording
    * only; `humanSide`/`viewerSide` and the rules still mean Blue and Red.
    */
   names?: SideNames;
+  /**
+   * Resume-after-reload's clock (spec 10.13): the clock stack a previous
+   * session left off with, matched to `initialMoves`. `undefined` for an
+   * ordinary new game, which is what makes this additive rather than a
+   * second code path — `initialClock` below falls back to today's "start
+   * fresh" behaviour whenever it's absent.
+   */
+  resumeClock?: ClockStack;
+  /**
+   * Fires whenever the live position changes, and once more when the game
+   * ends — everything App.tsx needs to persist the in-progress game (or
+   * clear it once there's a result) without owning any of this component's
+   * state itself.
+   */
+  onProgress?: (info: { history: readonly string[]; clockStack: ClockStack; result: GameResult | null }) => void;
+  /** Spec 10.7's stats for this variant and difficulty, passed straight through to `GameOver` — App.tsx owns computing and persisting them. */
+  stats?: VariantStats | null;
+  /** Set when this game is being refereed elsewhere — see `OnlineControl`. */
+  online?: OnlineControl;
 }
 
 /** Spec 10.2's ceiling, and a floor so the board never collapses to nothing. */
@@ -331,6 +419,14 @@ export default function Game({
   names = {},
   zen = false,
   onToggleZen,
+  sound = true,
+  onToggleSound,
+  aids: aidSettings = DEFAULT_SETTINGS.aids,
+  coordinates = true,
+  resumeClock,
+  onProgress,
+  stats = null,
+  online,
 }: GameProps) {
   const railed = useRail();
   // Zen collapses the rail, so the board gets that width back (see `.game--zen`).
@@ -343,8 +439,10 @@ export default function Game({
   const dragOriginRef = useRef<Square | null>(null);
   const workerRef = useRef<Worker | null>(null);
 
-  const mode: MatchMode = computer ? 'vs-computer' : 'pass-and-play';
-  const humanSide: Side = computer ? other(computer.side) : 'blue';
+  const mode: MatchMode = online ? online.mode : computer ? 'vs-computer' : 'pass-and-play';
+  // Online, `controlsSide` reduces to "your own side", which is what stops
+  // this browser moving the opponent's pieces even before the room refuses.
+  const humanSide: Side = online ? online.you : computer ? other(computer.side) : 'blue';
 
   // Spec 10.2: "your own corner sits bottom-left. Playing Red against the
   // computer rotates the board 180°." Pass-and-play keeps one orientation
@@ -367,15 +465,35 @@ export default function Game({
   // A review's clock is never started. It has nothing to measure — the game
   // is already played — and a running one would tick a finished game down to
   // a flag, inventing a result nobody played for.
-  const initialClock = useMemo(
-    () => (reviewOnly ? createClock(control) : startTurn(createClock(control), 'blue', Date.now())),
-    [control, reviewOnly],
-  );
+  //
+  // `resumeClock` (spec 10.13) is resume-after-reload's clock stack, matched
+  // to `initialMoves` by the caller. `rewind` to its last entry is the same
+  // primitive Undo already uses to fetch a historical snapshot; `startTurn`
+  // re-anchors it to now, exactly as a fresh game's clock is anchored below —
+  // resuming is "start a turn from a snapshot that isn't move zero," not a
+  // second way of building a clock.
+  const initialClock = useMemo(() => {
+    if (reviewOnly) return createClock(control);
+    if (resumeClock && resumeClock.length > 0) {
+      return startTurn(rewind(resumeClock, resumeClock.length - 1), opening.state.turn, Date.now());
+    }
+    return startTurn(createClock(control), 'blue', Date.now());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [control, reviewOnly, resumeClock, opening.state.turn]);
 
   const [history, setHistory] = useState<string[]>(() => [...(initialMoves ?? [])]);
   const [gameState, setGameState] = useState<GameState>(opening.state);
   const [selected, setSelected] = useState<Square | null>(null);
   const [focus, setFocus] = useState<Square>(0);
+  /**
+   * The square a mouse is currently over (spec 10.4/10.5's "selected or
+   * hovered") — mouse only, set from `onPointerMove`/`onPointerLeave` below.
+   * A touch tap fires the same pointer events with no corresponding "leave"
+   * until the next tap lands somewhere else, which would leave a phantom
+   * highlight and phantom threat arrows stuck on the last thing a finger
+   * touched — `pointerType` is what tells the two apart.
+   */
+  const [hoverSquare, setHoverSquare] = useState<Square | null>(null);
   const [status, setStatus] = useState<string>(() =>
     initialResult ? describeResult(initialResult, names) : whoseTurn(opening.state.turn, names),
   );
@@ -397,7 +515,9 @@ export default function Game({
    * the truth about a timed game rather than shipping a link that quietly
    * drops the clock.
    */
-  const [clockStack, setClockStack] = useState<ClockState[]>(() => [initialClock]);
+  const [clockStack, setClockStack] = useState<ClockState[]>(() =>
+    resumeClock && resumeClock.length > 0 ? [...resumeClock] : [initialClock],
+  );
 
   /**
    * How many plies the board is showing — null for the live position.
@@ -421,6 +541,7 @@ export default function Game({
    * the board is someone about to use the arrow keys, clicking it is not.
    */
   const [keyboardCursor, setKeyboardCursor] = useState(false);
+  const [cellText, setCellText] = useState('');
 
   const legal = useMemo(() => legalMoves(gameState), [gameState]);
   const counts = useMemo(() => typeCounts(gameState), [gameState]);
@@ -447,6 +568,21 @@ export default function Game({
     [viewPly, gameState, variant, history],
   );
   const fen = useMemo(() => toFen(viewState), [viewState]);
+
+  /**
+   * Spec 10.10: "The board is exposed as a grid of labelled cells (e5, Blue
+   * Scissors)." The SVG board is one `role="img"` (docs/VISUAL_SYSTEM.md,
+   * M3a), not a grid of focusable cells, so that labelling comes from this
+   * visually-hidden live region instead — read off wherever the keyboard
+   * cursor actually is (or, while reviewing, the read-only position being
+   * looked at), updated only while the cursor is showing, since a mouse
+   * user already sees the board and doesn't need a square narrated on
+   * every move.
+   */
+  useEffect(() => {
+    if (!keyboardCursor) return;
+    setCellText(describeSquare(viewState, focus));
+  }, [keyboardCursor, focus, viewState]);
 
   /** While reviewing, the highlight belongs to the move being looked at. */
   const shownLastMove = useMemo(() => {
@@ -494,6 +630,68 @@ export default function Game({
     return [...squares];
   }, [legal, reviewing, gameState.board]);
 
+  /**
+   * Spec 10.5's aid layer (M6). `visibleAids` is the same function Zen
+   * already runs through — a Hard computer is the other override on top of
+   * it (spec 14.5, Vig's call: no aids at Hard beyond the counts, same
+   * reasoning as Zen's own "counts report, everything else advises").
+   * `aidSettings` is the player's own choice from Settings (`aids` prop
+   * above); Zen and Hard are the two things that can quiet it further,
+   * neither of which ever turns an aid back ON that the player chose off.
+   */
+  const aids = useMemo(
+    () => visibleAids({ ...DEFAULT_SETTINGS, zen, aids: aidSettings }, computer?.level === 'hard'),
+    [zen, aidSettings, computer],
+  );
+
+  /** Shields (spec 2.10, 10.5): every square holding a piece nothing left on the board can capture. */
+  const shieldSquares = useMemo(() => {
+    if (reviewing || !aids.permanentPieces) return [];
+    const mask = permanentMask(gameState);
+    const squares: Square[] = [];
+    for (let square = 0; square < mask.length; square++) if (mask[square]) squares.push(square);
+    return squares;
+  }, [gameState, reviewing, aids.permanentPieces]);
+
+  /** Which sides' own corner is sealed right now (spec 7.6, 10.5) — feeds both the lock badge and the panel line below. */
+  const sealedSides = useMemo(() => {
+    if (reviewing || !aids.keepLock) return [];
+    return (['blue', 'red'] as const).filter((side) => isSealed(gameState, side));
+  }, [gameState, reviewing, aids.keepLock]);
+
+  /**
+   * Danger marks (spec 10.5): among the selected piece's own legal
+   * destinations, which ones leave it next to its predator. `dangerAfter`
+   * plays each candidate move on a scratch board — it never touches
+   * `gameState` — so this stays a read of "what if", not a second source of
+   * truth about where the piece actually is.
+   */
+  const dangerSquares = useMemo(() => {
+    if (selected == null || !aids.dangerMarks) return [];
+    return legal.filter((m) => m.from === selected && dangerAfter(gameState, m)).map((m) => m.to);
+  }, [selected, legal, gameState, aids.dangerMarks]);
+
+  /**
+   * Threat lines (spec 10.5), for whichever square is "selected or hovered"
+   * — hover wins while it's active (it's the more immediate signal: moving
+   * the mouse off a piece and onto another should switch what the arrows
+   * describe), falling back to the selected piece once the mouse leaves the
+   * board. `capturesFrom`/`threatenedBy` are both the engine's own
+   * structural reads rather than a `legal`-list filter, which is what makes
+   * hovering the OPPONENT's own piece (or an unselected one at all) show
+   * anything — `legal` only ever has moves for the side to move.
+   */
+  const threatSquare = hoverSquare ?? selected;
+  const threats = useMemo<ThreatOverlay | null>(() => {
+    if (threatSquare == null || !aids.threatLines || reviewing) return null;
+    if (gameState.board[threatSquare] === EMPTY) return null;
+    return {
+      square: threatSquare,
+      capturing: capturesFrom(gameState, threatSquare),
+      threatenedBy: threatenedBy(gameState, threatSquare),
+    };
+  }, [threatSquare, gameState, aids.threatLines, reviewing]);
+
   const svg = useMemo(
     () =>
       renderBoard({
@@ -504,9 +702,17 @@ export default function Game({
         family,
         appearance: view,
         orientation,
+        coordinates,
         lastMove: shownLastMove,
+        // Reviewing shows a finished position to look at, not one to point
+        // at — same reasoning `focusSquare` below already uses.
+        hoverSquare: reviewing ? null : hoverSquare,
         selection,
         pulseSquares,
+        shieldSquares,
+        sealedSides,
+        dangerSquares,
+        threats,
         // No cursor over a position that cannot be played — its dashed ring
         // would promise an input that does nothing — and none until the
         // keyboard is actually driving.
@@ -520,9 +726,15 @@ export default function Game({
       family,
       view,
       orientation,
+      coordinates,
       shownLastMove,
+      hoverSquare,
       selection,
       pulseSquares,
+      shieldSquares,
+      sealedSides,
+      dangerSquares,
+      threats,
       focus,
       reviewing,
       keyboardCursor,
@@ -530,7 +742,15 @@ export default function Game({
   );
 
   const doMove = useCallback(
-    (move: Move) => {
+    /**
+     * `fromRoom` is set when this move is one the room has told us about —
+     * the opponent's. Everything else about it is identical, which is the
+     * point: the animation, the sound, the announcement and the clock press
+     * are one code path whether the move came from a tap, the computer's
+     * worker or a socket. The only difference is that a move from the room
+     * must not be sent back to it.
+     */
+    (move: Move, fromRoom = false) => {
       const applied = applyMove(gameState, move);
       const text = moveToText(gameState, move);
       const at = Date.now();
@@ -552,9 +772,91 @@ export default function Game({
       setOffers((o) => offersOnMove(o));
       setClock(next);
       setClockStack((stack) => [...stack, next]);
+      // Spec 10.12: a tick on a move, a thud on a capture — for the human's
+      // tap AND the computer's reply, since both arrive through this one
+      // function (see the file header). The win chime is separate: it fires
+      // off `gameState.result` below, so every way a game can end plays it
+      // once, not just the ones that happen to go through doMove.
+      if (sound) (move.captured ? playCapture : playTick)();
+      // The room hears about it at the same instant the board shows it.
+      // `gameState.ply` is the ply this move IS; the room rejects a stale or
+      // duplicate one rather than playing it twice (docs/ONLINE.md).
+      if (online && !fromRoom) online.send.move(gameState.ply, text);
     },
-    [gameState, clock, names],
+    [gameState, clock, names, sound, online],
   );
+
+  /**
+   * The room's move list, applied here.
+   *
+   * Three cases, and they are deliberately not the same:
+   *
+   *   * Nothing new — the usual answer, including the echo of a move this
+   *     browser just played and drew for itself.
+   *   * Exactly one move on the end — the opponent's. It goes through
+   *     `doMove` like any other, so it slides, captures, announces and
+   *     sounds exactly as an offline move does.
+   *   * Anything else — a rejected ply, a takeback, or a reconnect that
+   *     missed several. The room's list wins and the board is rebuilt from
+   *     it without animation, because there is no single move to animate and
+   *     pretending otherwise would draw a move that never happened.
+   */
+  useEffect(() => {
+    if (!online) return;
+    const server = online.moves;
+    const unchanged =
+      server.length === history.length && server.every((move, ply) => move === history[ply]);
+    if (unchanged) return;
+
+    const appended =
+      server.length === history.length + 1 && history.every((move, ply) => move === server[ply]);
+    if (appended && !gameState.result) {
+      try {
+        doMove(parseMove(gameState, server[server.length - 1]!), true);
+        return;
+      } catch {
+        // Not playable from here, so this client's idea of the position is
+        // the one that is wrong. Fall through and take the room's.
+      }
+    }
+
+    const replayed = replay(variant, [...server]);
+    setHistory([...server]);
+    setGameState(replayed.state);
+    setSelected(null);
+    setAnim(null);
+    setClockStack((stack) => stack.slice(0, server.length + 1));
+    const events = replayed.events.at(-1);
+    const moveEvent = events?.find((e): e is Extract<typeof e, { type: 'move' }> => e.type === 'move');
+    setLastMove(moveEvent ? { from: moveEvent.from, to: moveEvent.to } : null);
+    setStatus(whoseTurn(replayed.state.turn, names));
+  }, [online, history, gameState, doMove, variant, names]);
+
+  /**
+   * The room owns the clock (spec 13.2), so this one is told rather than run.
+   * `online.clock` is the room's own reading in the shape the clock display
+   * already takes, which is why nothing about how a clock is drawn, warned
+   * about or read aloud needed a second version for online play.
+   */
+  useEffect(() => {
+    if (!online?.clock) return;
+    setClock(online.clock);
+  }, [online?.clock]);
+
+  /**
+   * The room's result, which the moves cannot imply: a resignation, a flag, a
+   * draw agreed, an abort, or an opponent who stopped being there. It is set
+   * straight onto the state rather than through the engine's helpers because
+   * the room has already decided, and the engine has a helper for some of
+   * these and not others.
+   */
+  useEffect(() => {
+    const result = online?.result;
+    if (!result) return;
+    setGameState((current) => (current.result ? current : { ...current, result }));
+    setStatus(describeResult(result, names));
+    setClock((current) => stopClock(current, Date.now()));
+  }, [online?.result, names]);
 
   /**
    * `setSelected` plus spec 10.4's neutral-only wording: selecting a neutral
@@ -691,6 +993,26 @@ export default function Game({
     [gameOver, reviewing, rectFor, orientation, selected, isSelectable, resolveClick, resolveDestination],
   );
 
+  // --- Hover (spec 10.4/10.5): a subtle highlight, and — if the threat-lines
+  // aid is on — arrows for whichever piece the mouse is over. Deliberately
+  // NOT the legal-move dots: those stay tied to an actual `selected` piece,
+  // an intent to move, not merely a pointer passing over the board.
+  const onPointerMove = useCallback(
+    (event: React.PointerEvent) => {
+      // Touch fires the same pointer events on tap, with no "leave" until a
+      // later tap lands elsewhere — treating that as hover would leave a
+      // highlight and a set of arrows stuck on whatever was touched last.
+      if (event.pointerType !== 'mouse' || gameOver || reviewing) {
+        setHoverSquare(null);
+        return;
+      }
+      const rect = rectFor();
+      setHoverSquare(rect ? squareAt(rect, event.clientX, event.clientY, orientation) : null);
+    },
+    [gameOver, reviewing, rectFor, orientation],
+  );
+  const onPointerLeave = useCallback(() => setHoverSquare(null), []);
+
   // --- Keyboard: arrow keys move the cursor; Enter/Space is exactly a tap on
   // it (spec 10.4) — reusing resolveClick is what makes this a complete input
   // method rather than a second, easily-diverging implementation.
@@ -763,6 +1085,10 @@ export default function Game({
 
   function undo() {
     if (history.length === 0 || gameOver || reviewing) return;
+    // Online there is no unilateral undo: taking a move back needs the
+    // opponent's agreement, which is a takeback offer the room arbitrates.
+    // The button is disabled, so this is the keyboard shortcut's guard.
+    if (online) return;
     // Against the computer, Undo takes back your move AND its reply — two
     // plies (spec 10.8) — so you land back on your own turn, not its.
     // Exactly one ply is available while the reply hasn't arrived yet
@@ -801,6 +1127,13 @@ export default function Game({
 
   function doResign() {
     if (gameOver) return;
+    // Online, every ending is the room's to declare — this browser asks, and
+    // the result comes back as a message like any other. Ending it locally
+    // would show one player a finished game the other was still playing.
+    if (online) {
+      online.send.resign();
+      return;
+    }
     const resigned = engineResign(gameState, gameState.turn);
     setGameState(resigned);
     setSelected(null);
@@ -811,6 +1144,10 @@ export default function Game({
   function doAbort() {
     if (gameOver) return;
     if (!canAbort(gameState.ply, mode).ok) return;
+    if (online) {
+      online.send.abort();
+      return;
+    }
     const aborted = abortGame(gameState);
     setGameState(aborted);
     setSelected(null);
@@ -820,6 +1157,13 @@ export default function Game({
 
   function offerDraw() {
     if (gameOver) return;
+    if (online) {
+      // The room keeps the offer state, including lichess's rule that you
+      // cannot re-offer straight after a refusal — so the etiquette is
+      // enforced in one place rather than trusted to each browser.
+      online.send.offerDraw();
+      return;
+    }
     const by = gameState.turn;
     if (!canOffer(offers, 'draw', by, gameState.ply).ok) return;
     const outcome = makeOffer(offers, 'draw', by, gameState.ply);
@@ -835,6 +1179,11 @@ export default function Game({
   }
 
   function respondToDraw(accept: boolean) {
+    if (online) {
+      if (accept) online.send.acceptDraw();
+      else online.send.declineDraw();
+      return;
+    }
     if (!offers.pending) return;
     const responder = other(offers.pending.by);
     if (accept) {
@@ -940,6 +1289,28 @@ export default function Game({
     }, 250);
     return () => window.clearInterval(interval);
   }, [gameOver, reviewOnly, control.unlimited, clock, names]);
+
+  // --- Sound's other half (spec 10.12): the chime marks any way a game can
+  // end, not only the corner/no-moves paths `doMove` sees directly — resign,
+  // abort, a flag and an agreed draw all set `gameState.result` through
+  // their own engine calls above, and this is the one place that has to
+  // notice every one of them rather than a chime call sprinkled into each.
+  // Keyed off the result itself, which only ever goes null -> set once per
+  // mounted game, so this fires exactly once per game, whichever way it ends.
+  useEffect(() => {
+    if (reviewOnly || !gameState.result || !sound) return;
+    playChime();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameState.result]);
+
+  // --- Resume-after-reload and local stats (spec 10.13): App.tsx owns the
+  // actual localStorage write, so this only ever hands up what changed —
+  // never touching storage from a component whose whole reason to exist is
+  // the rules and the board, not persistence.
+  useEffect(() => {
+    if (reviewOnly) return;
+    onProgress?.({ history, clockStack, result: gameState.result });
+  }, [reviewOnly, onProgress, history, clockStack, gameState.result]);
 
   // --- The computer opponent (M4): one worker for the component's life
   // (spec 9.4, "search never blocks the board"), a message handler kept
@@ -1094,8 +1465,61 @@ export default function Game({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anim]);
 
-  const drawOfferPending = offers.pending?.kind === 'draw' ? offers.pending : null;
+  const drawOfferPending = online
+    ? online.offer?.kind === 'draw'
+      ? online.offer
+      : null
+    : offers.pending?.kind === 'draw'
+      ? offers.pending
+      : null;
   const opponentSide = other(humanSide);
+
+  /** The race meter's panel line (spec 10.5), one per side — null hides the row entirely rather than rendering an empty one. */
+  const raceMeterLine = useMemo((): Record<Side, string | null> => {
+    if (reviewing || !aids.raceMeter) return { blue: null, red: null };
+    return { blue: raceMeterText(nearestRunner(gameState, 'blue')), red: raceMeterText(nearestRunner(gameState, 'red')) };
+  }, [gameState, reviewing, aids.raceMeter]);
+
+  /**
+   * The Keep's panel line (spec 7.6, 10.5) — shown on the sealed side's own
+   * panel, next to the lock badge `sealedSides` already puts on their
+   * corner square, so the two read as one fact rather than two unrelated
+   * ones.
+   */
+  const keepLockLine = useMemo((): Record<Side, string | null> => {
+    const line = (side: Side) => (sealedSides.includes(side) ? keepLockText(side, names) : null);
+    return { blue: line('blue'), red: line('red') };
+  }, [sealedSides, names]);
+
+  /**
+   * The type-count aid's spelled-out consequence (spec 10.5): "Red has no
+   * Paper left — Blue's Rocks are permanent." Gated on the engine's own
+   * `isPermanent` for an actual piece of the beneficiary type, not on the
+   * zero count alone — `permanentPieceText`'s own doc comment is why: a
+   * surviving neutral of the predator type can keep the beneficiary's piece
+   * capturable even after both sides' own count of it reaches zero.
+   */
+  const permanentNotes = useMemo(() => {
+    if (reviewing || !aids.permanentPieces) return [];
+    const notes: string[] = [];
+    for (const outSide of ['blue', 'red'] as const) {
+      for (const type of PIECE_TYPES) {
+        if (counts[outSide][type] !== 0) continue;
+        const beneficiary = other(outSide);
+        const permanentType = beats(type);
+        let square = -1;
+        for (let s = 0; s < gameState.board.length; s++) {
+          const piece = decodePiece(gameState.board[s]!);
+          if (piece?.owner === beneficiary && piece.type === permanentType) {
+            square = s;
+            break;
+          }
+        }
+        if (square >= 0 && isPermanent(gameState, square)) notes.push(permanentPieceText(outSide, type, names));
+      }
+    }
+    return notes;
+  }, [gameState, counts, reviewing, aids.permanentPieces, names]);
 
   /**
    * Spec 10.7's numbers, computed once the game is actually over — replaying
@@ -1133,6 +1557,8 @@ export default function Game({
         remainingMs={reviewOnly ? null : remainingAt(clock, opponentSide, now)}
         urgency={urgencyOf(clock, opponentSide, now)}
         running={clock.running === opponentSide}
+        raceMeter={raceMeterLine[opponentSide]}
+        keepLock={keepLockLine[opponentSide]}
         onGiveTime={
           canGive(GIFT_POLICIES[mode], giftFrom(opponentSide), opponentSide).ok
             ? () => giveTimeTo(opponentSide)
@@ -1151,8 +1577,11 @@ export default function Game({
             ? `${variant.name} board, reviewing move ${fullMoveOf(viewPly ?? 0)} of ${fullMoveOf(history.length)}. Use left and right arrows to step.`
             : `${variant.name} board. Use arrow keys to move the cursor, Enter to select or move.`
         }
+        aria-describedby="game-cell"
         onPointerDown={onPointerDown}
         onPointerUp={onPointerUp}
+        onPointerMove={onPointerMove}
+        onPointerLeave={onPointerLeave}
         onKeyDown={onKeyDown}
         onFocus={(event) => {
           // `:focus-visible` is what tells a tab from a click. Wrapped
@@ -1178,6 +1607,8 @@ export default function Game({
         remainingMs={reviewOnly ? null : remainingAt(clock, humanSide, now)}
         urgency={urgencyOf(clock, humanSide, now)}
         running={clock.running === humanSide}
+        raceMeter={raceMeterLine[humanSide]}
+        keepLock={keepLockLine[humanSide]}
         onGiveTime={
           canGive(GIFT_POLICIES[mode], giftFrom(humanSide), humanSide).ok
             ? () => giveTimeTo(humanSide)
@@ -1196,16 +1627,41 @@ export default function Game({
       <p className={`status${zen ? ' sr-only' : ''}`} aria-live="polite">
         {thinking ? 'Computer is thinking…' : status}
       </p>
+      <p id="game-cell" className="sr-only" aria-live="polite">
+        {cellText}
+      </p>
+
+      {/* Spec 10.5's "consequence spelled out" for a type at zero. Shared
+          rather than split across the two panels — the sentence names both
+          sides at once ("Red has no Paper left — Blue's Rocks are
+          permanent"), so one line here reads better than half of it living
+          in each panel. */}
+      {permanentNotes.length > 0 && (
+        <ul className="aid-notes" aria-live="polite">
+          {permanentNotes.map((note) => (
+            <li key={note}>{note}</li>
+          ))}
+        </ul>
+      )}
 
       {drawOfferPending && !gameOver && (
         <div className="offer-banner">
-          <p>{sideName(drawOfferPending.by, names)} offers a draw.</p>
-          <button type="button" onClick={() => respondToDraw(true)}>
-            Accept
-          </button>
-          <button type="button" onClick={() => respondToDraw(false)}>
-            Decline
-          </button>
+          {/* Online, the offer belongs to one of the two people looking at
+              this, and only the other one may answer it. Offline both sides
+              are the same person, so the buttons are always live. */}
+          {online && drawOfferPending.by === humanSide ? (
+            <p>Draw offered. Waiting for {sideName(other(humanSide), names)}.</p>
+          ) : (
+            <>
+              <p>{sideName(drawOfferPending.by, names)} offers a draw.</p>
+              <button type="button" onClick={() => respondToDraw(true)}>
+                Accept
+              </button>
+              <button type="button" onClick={() => respondToDraw(false)}>
+                Decline
+              </button>
+            </>
+          )}
         </div>
       )}
 
@@ -1252,9 +1708,14 @@ export default function Game({
         </div>
       ) : (
         <div className="bar">
-          <button type="button" onClick={undo} disabled={history.length === 0 || gameOver} title="Undo">
-            ↺
-          </button>
+          {/* Online, a move is taken back only by agreement — offers.ts allows
+              a takeback in a casual game and the room arbitrates it. Until
+              there is a button for asking, there is no button for doing. */}
+          {!online && (
+            <button type="button" onClick={undo} disabled={history.length === 0 || gameOver} title="Undo">
+              ↺
+            </button>
+          )}
           <button
             type="button"
             onClick={offerDraw}
@@ -1269,6 +1730,21 @@ export default function Game({
           <button type="button" onClick={doResign} disabled={gameOver} className="resign" title="Resign">
             ⚐
           </button>
+          {onToggleSound && (
+            // Spec 10.12's "mute toggle that's remembered" — App.tsx persists
+            // it the same way it persists Zen, which is why this lives beside
+            // Zen's own toggle rather than a Settings screen that doesn't
+            // exist yet (M6/M8's own note on that).
+            <button
+              type="button"
+              onClick={onToggleSound}
+              className={`sound${sound ? '' : ' sound--off'}`}
+              aria-pressed={!sound}
+              title={sound ? 'Mute sound' : 'Unmute sound'}
+            >
+              {sound ? '🔊' : '🔇'}
+            </button>
+          )}
           {onToggleZen && (
             // The toggle lives in the bar rather than behind a Settings
             // screen because the bar is the one thing Zen keeps — so the way
@@ -1312,6 +1788,7 @@ export default function Game({
           onReview={() => setViewPly(0)}
           onCopyLink={copyLink}
           copyNote={copyNote}
+          stats={computer ? stats : null}
         />
       )}
       </div>
@@ -1346,11 +1823,27 @@ interface PanelProps {
   remainingMs: number | null;
   urgency: Urgency;
   running: boolean;
+  /** The race meter's line for this side (spec 10.5) — null hides the row (Zen, Hard, or the aid switched off). */
+  raceMeter: string | null;
+  /** The Keep's panel line (spec 7.6, 10.5) — set only on the sealed side's own panel. */
+  keepLock: string | null;
   /** null when this mode/direction can't gift time (spec: e.g. self-gift, off outside vs-computer). */
   onGiveTime: (() => void) | null;
 }
 
-function Panel({ side, name, showName, place, counts, remainingMs, urgency, running, onGiveTime }: PanelProps) {
+function Panel({
+  side,
+  name,
+  showName,
+  place,
+  counts,
+  remainingMs,
+  urgency,
+  running,
+  raceMeter,
+  keepLock,
+  onGiveTime,
+}: PanelProps) {
   return (
     <div className={`panel panel--${place} panel--${side}`}>
       {showName ? (
@@ -1388,6 +1881,8 @@ function Panel({ side, name, showName, place, counts, remainingMs, urgency, runn
           )}
         </span>
       )}
+      {raceMeter && <p className="panel-aid panel-race">{raceMeter}</p>}
+      {keepLock && <p className="panel-aid panel-keep-lock">{keepLock}</p>}
     </div>
   );
 }

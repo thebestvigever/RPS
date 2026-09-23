@@ -106,6 +106,7 @@
       where "Blue, bottom-left" would be wrong half the time. */
 .panel {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
@@ -141,6 +142,31 @@
 .panel-counts { display: flex; gap: 0.6rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .count--last { color: var(--alert); }
 .count--out { color: var(--muted); text-decoration: line-through; }
+
+/* Spec 10.5's race meter and Keep-lock panel lines — `flex-basis: 100%` on a
+   `flex-wrap` parent drops each onto its own row under the name/counts/clock
+   line, rather than fighting them for space on it. */
+.panel-aid {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.panel-keep-lock { color: var(--ink); }
+/* The opponent's row reads outermost-to-innermost the other way (see
+   `.panel--opponent` above); its aid lines follow the same direction. */
+.panel--opponent .panel-aid { text-align: right; }
+
+/* The type-count aid's spelled-out consequence (spec 10.5) — shared between
+   both panels rather than split, since the sentence names both sides. */
+.aid-notes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-align: center;
+}
 
 .status {
   min-height: 1.4em;
@@ -195,6 +221,7 @@
 }
 
 .game-over-extinct { margin: 0 0 0.6rem; font-size: 0.85rem; color: var(--muted); }
+.game-over-stats { margin: 0 0 0.6rem; font-size: 0.85rem; color: var(--muted); }
 .game-over-note { margin: 0.5rem 0 0; font-size: 0.8rem; color: var(--muted); }
 
 .game-over-buttons {
@@ -435,3 +462,11 @@
 .game--zen { gap: 0.75rem; }
 .game--zen .back { opacity: 0.55; }
 .game--zen .back:hover { opacity: 1; }
+
+/* Spec 10.12's mute toggle — the same treatment as Zen's own toggle
+   (`.zen--on` above), so the two remembered on/off buttons in the bar read
+   as one family rather than two different conventions. */
+.bar button.sound--off {
+  border-color: var(--muted);
+  color: var(--muted);
+}

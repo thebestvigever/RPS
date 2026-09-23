@@ -47,3 +47,24 @@ export const CAPTURE_RING_STROKE_FRACTION = 0.045; // lands in 2.5-3px at the si
 export const FOCUS_RING_DIAMETER_FRACTION = 0.92;
 export const FOCUS_RING_STROKE_FRACTION = 0.03;
 export const FOCUS_RING_DASH_FRACTION = 0.05;
+
+// --- Information aids (spec 10.5, M6) — small badges and lines layered over
+// a piece or square, never so large they compete with the piece mark itself.
+
+/** The permanent-piece shield: a small badge in a square's corner, not centred over the piece (spec 10.5). */
+export const SHIELD_SIZE_FRACTION = 0.24;
+export const SHIELD_INSET_FRACTION = 0.08;
+
+/** The Keep-lock icon, same corner treatment as the shield so the two never collide (a piece is never both mid-move and sealed-corner in the same render). */
+export const KEEP_LOCK_SIZE_FRACTION = 0.28;
+export const KEEP_LOCK_INSET_FRACTION = 0.08;
+
+/** A danger mark: a small diamond outline on a legal-move destination where the mover could be taken right back. Smaller than the legal dot it sits beside. */
+export const DANGER_MARK_SIZE_FRACTION = 0.16;
+export const DANGER_MARK_STROKE_FRACTION = 0.03;
+
+/** Threat-line arrows: shaft stroke, arrowhead length and width, all as a fraction of the square so they scale with the board. Shortened at both ends so the line reads as pointing at pieces, not skewering them. */
+export const THREAT_ARROW_STROKE_FRACTION = 0.045;
+export const THREAT_ARROW_HEAD_LENGTH_FRACTION = 0.16;
+export const THREAT_ARROW_HEAD_WIDTH_FRACTION = 0.12;
+export const THREAT_ARROW_CLEARANCE_FRACTION = 0.3; // gap left at each end for the piece mark

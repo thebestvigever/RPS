@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { PIECE_TYPES, beats } from '@sps/engine';
-import { illegalCaptureReason, pieceTypeName } from '../src/text.js';
+import { illegalCaptureReason, keepLockText, permanentPieceText, pieceTypeName, raceMeterText } from '../src/text.js';
 
 describe('illegalCaptureReason', () => {
   it('same type: "Same type — can\'t capture"', () => {
@@ -32,5 +32,43 @@ describe('pieceTypeName', () => {
     expect(pieceTypeName('rock')).toBe('Rock');
     expect(pieceTypeName('paper')).toBe('Paper');
     expect(pieceTypeName('scissors')).toBe('Scissors');
+  });
+});
+
+describe('permanentPieceText (spec 10.5)', () => {
+  it('names the spec\'s own example verbatim', () => {
+    expect(permanentPieceText('red', 'paper')).toBe("Red has no Paper left — Blue's Rocks are permanent");
+  });
+
+  it('pluralises Rock and Paper, but leaves Scissors alone', () => {
+    // Blue out of rock -> Red's Scissors (rock's predator) are permanent.
+    expect(permanentPieceText('blue', 'rock')).toBe("Blue has no Rock left — Red's Scissors are permanent");
+    // Blue out of scissors -> Red's Paper (scissors's predator) are permanent.
+    expect(permanentPieceText('blue', 'scissors')).toBe("Blue has no Scissors left — Red's Papers are permanent");
+  });
+
+  it('uses custom names when given them', () => {
+    expect(permanentPieceText('red', 'paper', { blue: 'Maya', red: 'Sam' })).toBe(
+      "Sam has no Paper left — Maya's Rocks are permanent",
+    );
+  });
+});
+
+describe('keepLockText (spec 7.6, 10.5)', () => {
+  it('names the sealed side\'s own corner and the side shut out of it', () => {
+    expect(keepLockText('blue')).toBe("Blue's corner is sealed — Red can't win by the corner");
+    expect(keepLockText('red')).toBe("Red's corner is sealed — Blue can't win by the corner");
+  });
+});
+
+describe('raceMeterText (spec 10.5)', () => {
+  it('singular for one move, plural otherwise', () => {
+    expect(raceMeterText(1)).toBe('Nearest runner: 1 move');
+    expect(raceMeterText(4)).toBe('Nearest runner: 4 moves');
+    expect(raceMeterText(0)).toBe('Nearest runner: 0 moves');
+  });
+
+  it('says so when nothing is left to run', () => {
+    expect(raceMeterText(Infinity)).toBe('Nearest runner: none left');
   });
 });

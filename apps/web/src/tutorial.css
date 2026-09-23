@@ -1,0 +1,68 @@
+/* Spec 10.1's Tutorial screen and 10.9's six puzzles (M7). One column always
+   — a puzzle board never needs the Rail's two-column layout Game.tsx earns
+   for a full game with panels and a move list. `.board-wrap`, `.shake` and
+   `.status` are game.css's own classes, reused as-is rather than restated. */
+
+.tutorial {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 0.5rem 0 2rem;
+}
+
+.tutorial-title { margin: 0.5rem 0 0; align-self: flex-start; font-size: 1.3rem; }
+
+.tutorial-progress {
+  margin: 0 0 0.5rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.tutorial-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  margin-top: 0.5rem;
+}
+.tutorial-nav > button {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--grid);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+.tutorial-nav > button:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.tutorial-dots { display: flex; gap: 0.35rem; }
+.tutorial-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--grid);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.tutorial-dot--on { border-color: var(--blue); border-width: 2px; font-weight: 700; }
+.tutorial-dot--solved { color: var(--blue); border-color: var(--blue); }
+
+.tutorial-done {
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--blue);
+  border-radius: 8px;
+  text-align: center;
+  width: 100%;
+}
+.tutorial-done p { margin: 0 0 0.5rem; }
+.tutorial-done .play { width: auto; padding: 0.6rem 1.25rem; }

@@ -10,10 +10,10 @@ import { VARIANTS, parseSquare } from '@sps/engine';
 import type { Side } from '@sps/engine';
 import { PIECE_MOTION_CLASS, renderBoard } from '../src/render.js';
 import { displayCell } from '../src/orientation.js';
-import { SWATCHES, THEME_IDS } from '../src/themes.js';
+import { SWATCHES, THEMES, THEME_IDS } from '../src/themes.js';
 
 import vectors from '../../engine/test/fixtures/vectors.json' with { type: 'json' };
-import tutorial from '../../engine/test/fixtures/tutorial.json' with { type: 'json' };
+import tutorial from '../../engine/src/data/tutorial.json' with { type: 'json' };
 
 interface Vector {
   name: string;
@@ -345,5 +345,92 @@ describe('the animatable inner group', () => {
     // square rather than the piece, which reads as a lunge rather than a
     // squash.
     expect(svg).toContain('transform-box: fill-box; transform-origin: center');
+  });
+});
+
+describe('information aids (spec 10.5, M6)', () => {
+  const base = {
+    fen: VARIANTS.original.start,
+    variant: VARIANTS.original,
+    boardPx: 560,
+    theme: 'field-notes' as const,
+    family: 'cut-stone' as const,
+    appearance: { sideColors, viewerSide: 'blue' as const },
+  };
+  const alert = THEMES['field-notes'].alert;
+
+  it('draws a shield only where shieldSquares says to', () => {
+    const with_ = renderBoard({ ...base, shieldSquares: [parseSquare('a1')] });
+    const without = renderBoard({ ...base, shieldSquares: [] });
+    expect(with_).toContain('class="aid-shields"');
+    expect(without).not.toContain('class="aid-shields"');
+  });
+
+  it('draws a lock on a sealed side\'s own goal square(s), not the other side\'s', () => {
+    const blueSealed = renderBoard({ ...base, sealedSides: ['blue'] });
+    const none = renderBoard({ ...base, sealedSides: [] });
+    expect(blueSealed).toContain('class="aid-keep-lock"');
+    expect(none).not.toContain('class="aid-keep-lock"');
+  });
+
+  it('the 2x2 Corner variant locks every square in the goal block', () => {
+    const svg = renderBoard({ ...base, variant: VARIANTS.corner2x2, fen: VARIANTS.corner2x2.start, sealedSides: ['blue'] });
+    // homeSquares(corner2x2, 'blue') is four squares; the lock group should
+    // carry four badge groups, one per square.
+    const badgeGroups = svg.match(/<g transform="translate\([^)]+\)" aria-hidden="true">/g) ?? [];
+    expect(badgeGroups.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('marks a legal destination as dangerous only when dangerSquares says so', () => {
+    const from = parseSquare('d4'); // Blue Paper's starting square
+    const to = parseSquare('d5'); // empty, one step, plain move
+    const selection = { square: from, destinations: [{ square: to, capture: false }] };
+    const dangerous = renderBoard({ ...base, selection, dangerSquares: [to] });
+    const safe = renderBoard({ ...base, selection, dangerSquares: [] });
+    expect(dangerous).toContain(`stroke="${alert}"`);
+    expect(safe).not.toContain(`stroke="${alert}"`);
+  });
+
+  it('never marks a destination danger just because it is in the set for a different square', () => {
+    const from = parseSquare('d4');
+    const to = parseSquare('d5');
+    const selection = { square: from, destinations: [{ square: to, capture: false }] };
+    // dangerSquares names a square that isn't one of this selection's own
+    // destinations — nothing should be flagged.
+    const svg = renderBoard({ ...base, selection, dangerSquares: [parseSquare('e5')] });
+    expect(svg).not.toContain(`stroke="${alert}"`);
+  });
+
+  it('draws threat arrows only when threats is set, one colour outgoing and the alert colour incoming', () => {
+    // Blue Rock on d3 can capture Red Scissors on e4; Red Paper on d2 threatens the Rock back.
+    // fen.ts: blue is lowercase, red is uppercase.
+    const fen = '9/9/9/9/9/4S4/3r5/3P5/9 blue';
+    const threats = { square: parseSquare('d3'), capturing: [parseSquare('e4')], threatenedBy: [parseSquare('d2')] };
+    const withThreats = renderBoard({ ...base, fen, threats });
+    const without = renderBoard({ ...base, fen, threats: null });
+    expect(withThreats).toContain('class="aid-threats"');
+    expect(without).not.toContain('class="aid-threats"');
+    expect(withThreats).toContain(`stroke="${sideColors.blue}"`); // the outgoing arrow
+    expect(withThreats).toContain(`stroke="${alert}"`); // the incoming arrow
+  });
+
+  it('draws the hover highlight only on the hovered square', () => {
+    const hovered = renderBoard({ ...base, hoverSquare: parseSquare('e5') });
+    const none = renderBoard({ ...base, hoverSquare: null });
+    expect(hovered).toContain('class="aid-hover"');
+    expect(none).not.toContain('class="aid-hover"');
+  });
+
+  it('hoverSquare 0 (a9, a real square) is not treated as falsy', () => {
+    expect(renderBoard({ ...base, hoverSquare: 0 })).toContain('class="aid-hover"');
+  });
+
+  it('the hover tint is lighter than the last-move tint, so the two never read as the same mark', () => {
+    const hovered = renderBoard({ ...base, hoverSquare: parseSquare('e5') });
+    const lastMove = renderBoard({ ...base, lastMove: { from: parseSquare('d4'), to: parseSquare('e5') } });
+    const hoverAlpha = Number(hovered.match(/fill-opacity="([\d.]+)"[^>]*class="aid-hover"/)?.[1]);
+    const lastMoveAlpha = Number(lastMove.match(/fill-opacity="([\d.]+)"/)?.[1]);
+    expect(hoverAlpha).toBeGreaterThan(0);
+    expect(hoverAlpha).toBeLessThan(lastMoveAlpha);
   });
 });

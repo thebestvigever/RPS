@@ -93,10 +93,18 @@ export {
 
 export {
   canHoldSeal,
+  capturesFrom,
+  dangerAfter,
+  defendersOf,
   distanceToGoal,
   isPermanent,
   isSealed,
   nearestRunner,
+  nearestRunnerSquare,
   permanentMask,
+  threatenedBy,
   typeCounts,
 } from './analysis.js';
+
+export type { TutorialPuzzle } from './tutorial.js';
+export { TUTORIAL_PUZZLES } from './tutorial.js';

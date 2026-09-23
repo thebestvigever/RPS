@@ -24,7 +24,7 @@ import {
 } from '@sps/engine';
 import type { PieceType, Side, Square, VariantConfig } from '@sps/engine';
 
-import { CORNER_TINT_ALPHA, LAST_MOVE_TINT_ALPHA, THEMES, type ThemeId } from './themes.js';
+import { CORNER_TINT_ALPHA, HOVER_TINT_ALPHA, LAST_MOVE_TINT_ALPHA, THEMES, type ThemeId } from './themes.js';
 import { familyMark, type Family, type FamilyId } from './families.js';
 import { renderMode, type RenderMode } from './ownership.js';
 import { DEFAULT_ORIENTATION, displayCell, squareAtCell, type Orientation } from './orientation.js';
@@ -32,9 +32,13 @@ import { dotAlpha } from './contrast.js';
 import {
   CAPTURE_RING_DIAMETER_FRACTION,
   CAPTURE_RING_STROKE_FRACTION,
+  DANGER_MARK_SIZE_FRACTION,
+  DANGER_MARK_STROKE_FRACTION,
   FOCUS_RING_DASH_FRACTION,
   FOCUS_RING_DIAMETER_FRACTION,
   FOCUS_RING_STROKE_FRACTION,
+  KEEP_LOCK_INSET_FRACTION,
+  KEEP_LOCK_SIZE_FRACTION,
   KNOCKOUT_DISC_FRACTION,
   KNOCKOUT_MARK_FRACTION,
   KNOCKOUT_RING_STROKE_FRACTION,
@@ -42,11 +46,17 @@ import {
   NEUTRAL_RING_DASH_FRACTION,
   NEUTRAL_RING_DIAMETER_FRACTION,
   SELECTION_RING_STROKE_FRACTION,
+  SHIELD_INSET_FRACTION,
+  SHIELD_SIZE_FRACTION,
   STANDALONE_BOX_FRACTION,
   STANDALONE_RING_DIAMETER_FRACTION,
   STANDALONE_RING_STROKE_FRACTION,
+  THREAT_ARROW_CLEARANCE_FRACTION,
+  THREAT_ARROW_HEAD_LENGTH_FRACTION,
+  THREAT_ARROW_HEAD_WIDTH_FRACTION,
+  THREAT_ARROW_STROKE_FRACTION,
 } from './sizing.js';
-import { el, group, round, text } from './svg.js';
+import { el, group, points, round, text } from './svg.js';
 
 /**
  * The inner, animatable group inside every piece (see `piecesLayer`). Exported
@@ -83,6 +93,18 @@ export interface Selection {
   destinations: readonly SelectionDestination[];
 }
 
+/**
+ * Threat lines for one piece (spec 10.5) — the selected or hovered square,
+ * the enemy squares it can capture right now, and the squares of pieces that
+ * could capture it. Both lists come from the engine's own `legalMoves` and
+ * `threatenedBy`; this package only draws what it is handed.
+ */
+export interface ThreatOverlay {
+  square: Square;
+  capturing: readonly Square[];
+  threatenedBy: readonly Square[];
+}
+
 export interface RenderOptions {
   fen: string;
   variant: VariantConfig;
@@ -95,6 +117,8 @@ export interface RenderOptions {
   coordinates?: boolean;
   /** Origin and destination of the last move, spec 10.2 / 10.5. */
   lastMove?: { from: Square; to: Square } | null;
+  /** The square the pointer is currently over (mouse only — spec 10.4/10.5): a subtle highlight, distinct from and lighter than the last-move tint. */
+  hoverSquare?: Square | null;
   /** The selected piece and its legal destinations — dots for a plain move, rings for a capture (spec 10.4). */
   selection?: Selection | null;
   /** The keyboard focus cursor (spec 10.4/10.10) — a visible ring distinct from selection's. */
@@ -103,6 +127,14 @@ export interface RenderOptions {
   pulseSquares?: readonly Square[];
   /** Whose corner sits bottom-left (spec 10.2). Defaults to Blue's. */
   orientation?: Orientation;
+  /** Permanent pieces (spec 2.10, 10.5) — a small shield badge, from `isPermanent`/`permanentMask`. */
+  shieldSquares?: readonly Square[];
+  /** Sides whose corner is currently sealed (spec 7.6, 10.5) — a lock badge on that side's own goal square(s). */
+  sealedSides?: readonly Side[];
+  /** Threat lines for the selected or hovered piece (spec 10.5). */
+  threats?: ThreatOverlay | null;
+  /** Legal destinations where the moving piece could be taken right back (spec 10.5's danger marks) — a subset of `selection`'s own destinations. */
+  dangerSquares?: readonly Square[];
 }
 
 export function renderBoard(options: RenderOptions): string {
@@ -115,10 +147,15 @@ export function renderBoard(options: RenderOptions): string {
     appearance,
     coordinates = true,
     lastMove = null,
+    hoverSquare = null,
     selection = null,
     focusSquare = null,
     pulseSquares = [],
     orientation = DEFAULT_ORIENTATION,
+    shieldSquares = [],
+    sealedSides = [],
+    threats = null,
+    dangerSquares = [],
   } = options;
 
   const themeTokens = THEMES[themeId];
@@ -128,11 +165,13 @@ export function renderBoard(options: RenderOptions): string {
   const squarePx = boardPx / FILES;
   const mode = renderMode(squarePx);
   const opponentSide = other(appearance.viewerSide);
+  const dangerSet = new Set(dangerSquares);
 
   const layers = [
     backgroundLayer(boardPx, squarePx, themeTokens.square, themeTokens.grid),
     cornerTintLayer(variant, appearance.sideColors, squarePx, orientation),
     lastMove ? lastMoveLayer(lastMove, themeTokens.ink, squarePx, orientation) : '',
+    hoverSquare != null ? hoverLayer(hoverSquare, themeTokens.ink, squarePx, orientation) : '',
     flameLayer(boardPx, themeTokens.ink),
     piecesLayer(
       state.board,
@@ -146,11 +185,27 @@ export function renderBoard(options: RenderOptions): string {
       orientation,
       new Set(pulseSquares),
     ),
+    shieldSquares.length > 0 ? shieldLayer(shieldSquares, themeTokens.ink, squarePx, orientation) : '',
+    sealedSides.length > 0
+      ? keepLockLayer(variant, sealedSides, themeTokens.ink, squarePx, orientation)
+      : '',
     coordinates
       ? coordinatesLayer(boardPx, squarePx, themeTokens.muted, themeTokens.fonts.mono, orientation)
       : '',
     selection
-      ? selectionLayer(selection, state.board, appearance.sideColors, themeTokens.square, squarePx, orientation)
+      ? selectionLayer(
+          selection,
+          state.board,
+          appearance.sideColors,
+          themeTokens.square,
+          themeTokens.alert,
+          squarePx,
+          orientation,
+          dangerSet,
+        )
+      : '',
+    threats
+      ? threatLayer(threats, state.board, appearance.sideColors, themeTokens.alert, squarePx, orientation)
       : '',
     focusSquare != null ? focusLayer(focusSquare, themeTokens.ink, squarePx, orientation) : '',
   ];
@@ -245,6 +300,20 @@ function lastMoveLayer(
   return group('g', {}, rects.join(''));
 }
 
+/** The hover highlight (spec 10.4/10.5): one square, lighter than the last-move tint so the two never read as the same kind of mark. */
+function hoverLayer(square: Square, ink: string, squarePx: number, orientation: Orientation): string {
+  const { x, y } = squareXY(square, squarePx, orientation);
+  return el('rect', {
+    x: round(x),
+    y: round(y),
+    width: round(squarePx),
+    height: round(squarePx),
+    fill: ink,
+    'fill-opacity': HOVER_TINT_ALPHA,
+    class: 'aid-hover',
+  });
+}
+
 /**
  * The selected piece's outline, a legal-move dot on each plain destination
  * and a capture ring on each destination that takes something (spec 10.4).
@@ -257,8 +326,10 @@ function selectionLayer(
   board: Int8Array,
   sideColors: Record<Side, string>,
   squareColor: string,
+  alert: string,
   squarePx: number,
   orientation: Orientation,
+  dangerSquares: ReadonlySet<Square>,
 ): string {
   const code = board[selection.square]!;
   const piece = code === EMPTY ? null : decodePiece(code);
@@ -272,9 +343,210 @@ function selectionLayer(
         ? captureRing(destination.square, color, squarePx, orientation)
         : legalDot(destination.square, color, squareColor, squarePx, orientation),
     );
+    if (dangerSquares.has(destination.square)) {
+      parts.push(dangerDiamond(destination.square, alert, squarePx, orientation));
+    }
   }
 
   return group('g', {}, parts.join(''));
+}
+
+/**
+ * A small diamond outline around a legal-move destination the piece would
+ * not be safe on (spec 10.5's danger marks) — bigger than the legal dot it
+ * sits beside, in the theme's alert colour, so the warning reads apart from
+ * the dot's own "you may move here" meaning.
+ */
+function dangerDiamond(square: Square, alert: string, squarePx: number, orientation: Orientation): string {
+  const { x, y } = squareXY(square, squarePx, orientation);
+  const cx = x + squarePx / 2;
+  const cy = y + squarePx / 2;
+  const r = (squarePx * DANGER_MARK_SIZE_FRACTION) / 2;
+  const stroke = Math.max(1, squarePx * DANGER_MARK_STROKE_FRACTION);
+  const diamond: ReadonlyArray<readonly [number, number]> = [
+    [cx, cy - r],
+    [cx + r, cy],
+    [cx, cy + r],
+    [cx - r, cy],
+  ];
+  return el('polygon', {
+    points: points(diamond),
+    fill: 'none',
+    stroke: alert,
+    'stroke-width': round(stroke),
+  });
+}
+
+/**
+ * The permanent-piece shield (spec 2.10, 10.5): a small badge in a square's
+ * top-right corner, deliberately off-centre so it never competes with the
+ * piece mark itself or with a Keep-lock badge sharing the same square (the
+ * lock takes the opposite corner, `keepLockLayer`).
+ */
+function shieldLayer(
+  squares: readonly Square[],
+  ink: string,
+  squarePx: number,
+  orientation: Orientation,
+): string {
+  const size = squarePx * SHIELD_SIZE_FRACTION;
+  const inset = squarePx * SHIELD_INSET_FRACTION;
+  const badges = squares.map((square) => {
+    const { x, y } = squareXY(square, squarePx, orientation);
+    const left = x + squarePx - inset - size;
+    const top = y + inset;
+    return group(
+      'g',
+      { transform: `translate(${round(left)},${round(top)})`, 'aria-hidden': 'true' },
+      shieldGlyph(size, ink),
+    );
+  });
+  return group('g', { class: 'aid-shields' }, badges.join(''));
+}
+
+/** A simple pentagon shield outline, drawn in a `size`x`size` box at the origin. */
+function shieldGlyph(size: number, color: string): string {
+  const shape: ReadonlyArray<readonly [number, number]> = [
+    [0, 0],
+    [size, 0],
+    [size, size * 0.55],
+    [size / 2, size],
+    [0, size * 0.55],
+  ];
+  return el('polygon', { points: points(shape), fill: color, 'fill-opacity': 0.85 });
+}
+
+/**
+ * The Keep lock (spec 7.6, 10.5): a padlock badge on a sealed side's own
+ * goal square(s), top-left corner — the shield's mirror, so a piece that is
+ * both permanent and parked on the sealing square carries both badges
+ * without either overlapping the other or the piece mark between them.
+ */
+function keepLockLayer(
+  variant: VariantConfig,
+  sealedSides: readonly Side[],
+  ink: string,
+  squarePx: number,
+  orientation: Orientation,
+): string {
+  const size = squarePx * KEEP_LOCK_SIZE_FRACTION;
+  const inset = squarePx * KEEP_LOCK_INSET_FRACTION;
+  const badges: string[] = [];
+  for (const side of sealedSides) {
+    for (const square of homeSquares(variant, side)) {
+      const { x, y } = squareXY(square, squarePx, orientation);
+      badges.push(
+        group(
+          'g',
+          { transform: `translate(${round(x + inset)},${round(y + inset)})`, 'aria-hidden': 'true' },
+          lockGlyph(size, ink),
+        ),
+      );
+    }
+  }
+  return group('g', { class: 'aid-keep-lock' }, badges.join(''));
+}
+
+/** A padlock outline: a shackle arc over a rounded body, drawn in a `size`x`size` box at the origin. */
+function lockGlyph(size: number, color: string): string {
+  const bodyH = size * 0.6;
+  const bodyY = size - bodyH;
+  const shackleR = size * 0.28;
+  const shackleCx = size / 2;
+  const strokeW = Math.max(1, size * 0.14);
+  const body = el('rect', {
+    x: 0,
+    y: round(bodyY),
+    width: round(size),
+    height: round(bodyH),
+    rx: round(size * 0.1),
+    fill: color,
+  });
+  const shackle = el('path', {
+    d: `M ${round(shackleCx - shackleR)} ${round(bodyY + strokeW / 2)} A ${round(shackleR)} ${round(shackleR)} 0 0 1 ${round(shackleCx + shackleR)} ${round(bodyY + strokeW / 2)}`,
+    fill: 'none',
+    stroke: color,
+    'stroke-width': round(strokeW),
+  });
+  return shackle + body;
+}
+
+/**
+ * Threat lines (spec 10.5): arrows from the selected/hovered piece to enemy
+ * pieces it can capture right now, in its own side's colour (the same
+ * colour `selectionLayer` draws its ring in), and arrows from adjacent
+ * pieces that could capture it, in the theme's alert colour — the same
+ * warning colour `dangerDiamond` uses, so "something can take this" reads
+ * consistently everywhere it shows up.
+ */
+function threatLayer(
+  threats: ThreatOverlay,
+  board: Int8Array,
+  sideColors: Record<Side, string>,
+  alert: string,
+  squarePx: number,
+  orientation: Orientation,
+): string {
+  const code = board[threats.square]!;
+  const piece = code === EMPTY ? null : decodePiece(code);
+  const ownColor = piece && piece.owner !== 'neutral' ? sideColors[piece.owner] : Object.values(sideColors)[0]!;
+
+  const parts: string[] = [];
+  for (const to of threats.capturing) parts.push(arrow(threats.square, to, ownColor, squarePx, orientation));
+  for (const from of threats.threatenedBy) parts.push(arrow(from, threats.square, alert, squarePx, orientation));
+  return group('g', { class: 'aid-threats' }, parts.join(''));
+}
+
+/**
+ * One arrow between two adjacent squares' centres — shaft plus a triangular
+ * head, both shortened by a clearance fraction at each end so the line
+ * points at the pieces rather than running through their marks.
+ */
+function arrow(from: Square, to: Square, color: string, squarePx: number, orientation: Orientation): string {
+  const a = squareXY(from, squarePx, orientation);
+  const b = squareXY(to, squarePx, orientation);
+  const ax = a.x + squarePx / 2;
+  const ay = a.y + squarePx / 2;
+  const bx = b.x + squarePx / 2;
+  const by = b.y + squarePx / 2;
+
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len;
+  const uy = dy / len;
+
+  const clearance = squarePx * THREAT_ARROW_CLEARANCE_FRACTION;
+  const headLength = squarePx * THREAT_ARROW_HEAD_LENGTH_FRACTION;
+  const headWidth = squarePx * THREAT_ARROW_HEAD_WIDTH_FRACTION;
+  const stroke = Math.max(1, squarePx * THREAT_ARROW_STROKE_FRACTION);
+
+  const startX = ax + ux * clearance;
+  const startY = ay + uy * clearance;
+  const tipX = bx - ux * clearance;
+  const tipY = by - uy * clearance;
+  const shaftEndX = tipX - ux * headLength;
+  const shaftEndY = tipY - uy * headLength;
+
+  const shaft = el('line', {
+    x1: round(startX),
+    y1: round(startY),
+    x2: round(shaftEndX),
+    y2: round(shaftEndY),
+    stroke: color,
+    'stroke-width': round(stroke),
+    'stroke-linecap': 'round',
+  });
+
+  const nx = -uy;
+  const ny = ux;
+  const head: ReadonlyArray<readonly [number, number]> = [
+    [tipX, tipY],
+    [shaftEndX + (nx * headWidth) / 2, shaftEndY + (ny * headWidth) / 2],
+    [shaftEndX - (nx * headWidth) / 2, shaftEndY - (ny * headWidth) / 2],
+  ];
+
+  return shaft + el('polygon', { points: points(head), fill: color });
 }
 
 function selectionRing(square: Square, color: string, squarePx: number, orientation: Orientation): string {

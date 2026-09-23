@@ -6,16 +6,17 @@
 // from comparing the start position with the end one (spec 7.7) — "when a type
 // went extinct" is not recoverable from two boards at all.
 //
-// Not here, and not pretended: spec 10.7's "local stats per variant and
-// difficulty: wins, losses, draws and current streak". Those are localStorage
-// (spec 10.13), which is M8's persistence work — the same milestone that owns
-// resuming an in-progress game. A streak counter that resets every reload
-// would be worse than none.
+// Spec 10.7's "local stats per variant and difficulty: wins, losses, draws
+// and current streak" now lands here (M8) — App.tsx owns the localStorage
+// read/write (spec 10.13) and hands down the number for whichever variant
+// and difficulty this game was actually played at; this component only
+// ever renders what it's given, same as every other fact on this overlay.
 
 import { sideName } from '@sps/board';
 import type { SideNames } from '@sps/board';
 import type { GameResult, GameSummary, Side } from '@sps/engine';
 import { describeExtinction, describeResult, fullMoveOf } from './announce.js';
+import type { VariantStats } from './stats.js';
 
 export interface GameOverProps {
   result: GameResult;
@@ -30,6 +31,8 @@ export interface GameOverProps {
   onCopyLink: () => void;
   /** Feedback for Copy link — the clipboard can simply refuse, and silence reads as a broken button. */
   copyNote: string | null;
+  /** Spec 10.7's stats for this variant and difficulty — null in pass-and-play, where there's no fixed "you" to keep one for (stats.ts's own header). */
+  stats?: VariantStats | null;
 }
 
 export default function GameOver({
@@ -42,6 +45,7 @@ export default function GameOver({
   onReview,
   onCopyLink,
   copyNote,
+  stats,
 }: GameOverProps) {
   // Spec 10.7 asks for "the winner and the reason in words", which
   // `describeResult` already writes — so it stays verbatim, and the personal
@@ -80,6 +84,13 @@ export default function GameOver({
       {summary.extinctions.length > 0 && (
         <p className="game-over-extinct">
           Wiped out: {summary.extinctions.map((extinction) => describeExtinction(extinction, names)).join(' · ')}
+        </p>
+      )}
+
+      {stats && (
+        <p className="game-over-stats">
+          Record: {stats.wins}W {stats.losses}L {stats.draws}D
+          {stats.streak > 1 ? ` · ${stats.streak}-win streak` : ''}
         </p>
       )}
 

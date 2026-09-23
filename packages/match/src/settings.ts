@@ -77,14 +77,28 @@ const ZEN_AIDS: Aids = {
 };
 
 /**
+ * What Hard hides — Vig's call on spec 14.5 (BUILD_PLAN.md's M6 open
+ * question). Not just the hint, which §9.5 already restricts to Easy and
+ * Medium: every advisory aid. A player who chose Hard chose to be tested
+ * without the board doing the reading for them. Same shape as `ZEN_AIDS`,
+ * and the same reasoning — type counts report the position rather than
+ * advising on it, so they survive.
+ */
+const HARD_AIDS: Aids = { ...ZEN_AIDS };
+
+/**
  * What the board should actually show. Zen overrides the aids for as long as it
  * is on; it does not overwrite them, so switching it off restores the player's
- * own choices rather than the defaults.
+ * own choices rather than the defaults. Playing a Hard computer applies the
+ * same kind of override on top, independently of Zen.
  *
- * Zen never turns an aid ON that the player had chosen to hide — it is a
- * quieting pass over their own settings, so an off count stays off.
+ * Neither ever turns an aid ON that the player had chosen to hide — both are
+ * quieting passes over their own settings, so an off count stays off.
  */
-export function visibleAids(settings: DisplaySettings): Aids {
-  if (!settings.zen) return settings.aids;
-  return { ...ZEN_AIDS, typeCounts: ZEN_AIDS.typeCounts && settings.aids.typeCounts };
+export function visibleAids(settings: DisplaySettings, hardOpponent = false): Aids {
+  const aids = settings.zen
+    ? { ...ZEN_AIDS, typeCounts: ZEN_AIDS.typeCounts && settings.aids.typeCounts }
+    : settings.aids;
+  if (!hardOpponent) return aids;
+  return { ...HARD_AIDS, typeCounts: HARD_AIDS.typeCounts && aids.typeCounts };
 }

@@ -1,0 +1,69 @@
+/* Settings screen — spec 10.1, 10.5. Reuses styles.css's tokens (--ink,
+   --muted, --grid, --blue, --square-alt) rather than declaring its own. */
+
+.settings-screen { padding-bottom: 2rem; }
+.settings-screen h1 { margin-top: 0.5rem; }
+
+.settings-section {
+  margin-top: 1.75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--grid);
+}
+.settings-section h2 { font-size: 1rem; margin: 0 0 0.5rem; }
+
+.settings-note { color: var(--muted); font-size: 0.85rem; margin: 0 0 0.75rem; }
+
+.settings-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.5rem 0;
+  cursor: pointer;
+}
+.settings-row input[type='checkbox'] {
+  margin-top: 0.2rem;
+  width: 1.05rem;
+  height: 1.05rem;
+  flex: none;
+  accent-color: var(--blue);
+}
+.settings-row-text { display: flex; flex-direction: column; gap: 0.1rem; }
+.settings-row-label { font-weight: 600; }
+.settings-row-description { color: var(--muted); font-size: 0.82rem; }
+
+.theme-picker { display: flex; flex-direction: column; gap: 0.5rem; }
+.theme-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--grid);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.theme-option:hover { background: var(--square-alt); }
+.theme-option:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.theme-option--on { border-color: var(--blue); border-width: 2px; }
+.theme-option-name { font-weight: 600; }
+.theme-option-description { color: var(--muted); font-size: 0.82rem; }
+
+/* Matches .tutorial-link (styles.css) — a secondary action on Home. */
+.settings-link {
+  display: block;
+  width: 100%;
+  margin-top: 0.5rem;
+  padding: 0.6rem 1rem;
+  border: 1px solid var(--grid);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+.settings-link:hover { background: var(--square-alt); }
+.settings-link:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }

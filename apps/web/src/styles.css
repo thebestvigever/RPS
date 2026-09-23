@@ -142,3 +142,24 @@ h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
   cursor: pointer;
 }
 .mode-option--on { border-color: var(--blue); border-width: 2px; font-weight: 600; }
+
+/* Spec 10.7's local stats, read for whichever variant/difficulty Home has
+   picked (App.tsx's own comment on why this is vs-computer only). */
+.stats-line { margin: 0.5rem 0 0; color: var(--muted); font-size: 0.85rem; }
+
+/* Spec 10.1/10.9's Tutorial entry point — a secondary action, so it reads
+   clearly under `.play`'s primary one rather than competing with it. */
+.tutorial-link {
+  display: block;
+  width: 100%;
+  margin-top: 0.75rem;
+  padding: 0.6rem 1rem;
+  border: 1px solid var(--grid);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+.tutorial-link:hover { background: var(--square-alt); }
+.tutorial-link:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }

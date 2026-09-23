@@ -5,7 +5,10 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   applyMove,
   canHoldSeal,
+  capturesFrom,
   createGame,
+  dangerAfter,
+  defendersOf,
   fromFen,
   getVariant,
   IllegalMoveError,
@@ -13,9 +16,11 @@ import {
   isSealed,
   legalMoves,
   moveToText,
+  nearestRunnerSquare,
   parseMove,
   parseSquare,
   resign,
+  threatenedBy,
   toFen,
   typeCounts,
 } from '../src/index.js';
@@ -375,6 +380,118 @@ describe('the Keep (spec 2.10 and 7.6)', () => {
     // off from the rest of the board.
     const state = load('9/9/9/4S4/9/9/9/rr7/1r7 red');
     expect(isSealed(state, 'blue')).toBe(true);
+  });
+});
+
+describe('information aids (spec 10.5)', () => {
+  // Reminder for every FEN in this block (fen.ts): blue is lowercase, red
+  // is uppercase, a neutral is `n` + an uppercase letter.
+
+  it('nearestRunnerSquare picks the piece nearestRunner measured, not just any of theirs', () => {
+    // Blue's Paper on e5 is 4 king-moves from the goal at i9; the Rock on a1 is 8.
+    const state = load('9/9/9/9/4p4/9/9/9/r8 blue');
+    expect(nearestRunnerSquare(state, 'blue')).toBe(parseSquare('e5'));
+  });
+
+  it('nearestRunnerSquare is null for a side with nothing left on the board', () => {
+    const state = load('9/9/9/9/9/9/9/9/r8 blue');
+    expect(nearestRunnerSquare(state, 'red')).toBeNull();
+  });
+
+  it('threatenedBy: an adjacent predator counts, a non-predator neighbour does not', () => {
+    // e5 Blue Paper; e6 Red Scissors beats Paper (threat); d5 Blue Rock does
+    // not — it's Blue's own piece, and Rock beats Scissors, not the reverse.
+    const state = load('9/9/9/4S4/3rp4/9/9/9/9 blue');
+    expect(threatenedBy(state, parseSquare('e5'))).toEqual([parseSquare('e6')]);
+    expect(threatenedBy(state, parseSquare('d5'))).toEqual([]);
+  });
+
+  it('threatenedBy sees a neutral predator too — a third party either side could use', () => {
+    const neutralState = load('9/9/9/4nS4/4p4/9/9/9/9 blue', neutrals);
+    expect(threatenedBy(neutralState, parseSquare('e5'))).toEqual([parseSquare('e6')]);
+  });
+
+  it('defendersOf: a friendly piece one step behind in the cycle guards it', () => {
+    // e5 Blue Paper attacked by e6 Red Scissors; d5 Blue Rock is Paper's
+    // guard by the cycle identity — Rock beats Scissors, so recapturing on
+    // e5 punishes whatever took it.
+    const state = load('9/9/9/4S4/3rp4/9/9/9/9 blue');
+    expect(defendersOf(state, parseSquare('e5'))).toEqual([parseSquare('d5')]);
+    // d5's own guard would be a Scissors, and there isn't one.
+    expect(defendersOf(state, parseSquare('d5'))).toEqual([]);
+  });
+
+  it('defendersOf ignores an enemy piece of the guarding type — only a friendly one counts', () => {
+    const state = load('9/9/9/4S4/3Rp4/9/9/9/9 blue');
+    expect(defendersOf(state, parseSquare('e5'))).toEqual([]);
+  });
+
+  it('defendersOf is empty for an empty square', () => {
+    const state = createGame(original);
+    expect(defendersOf(state, parseSquare('e5'))).toEqual([]);
+  });
+
+  it("capturesFrom matches what the mover's own piece can actually capture", () => {
+    // Same fixture as the threatenedBy test above: d5 Blue Rock is adjacent
+    // to e6 Red Scissors and beats it; e5 Blue Paper is not adjacent to
+    // anything it beats.
+    const state = load('9/9/9/4S4/3rp4/9/9/9/9 blue');
+    expect(capturesFrom(state, parseSquare('d5'))).toEqual([parseSquare('e6')]);
+    expect(capturesFrom(state, parseSquare('e5'))).toEqual([]);
+  });
+
+  it("capturesFrom reads the OPPONENT's own piece as what it would capture on ITS turn", () => {
+    // It's Blue's move, but hovering Red's Scissors on e6 asks what e6 would
+    // take if it were Red's turn instead — Scissors beats Blue's Paper on e5.
+    const state = load('9/9/9/4S4/3rp4/9/9/9/9 blue');
+    expect(capturesFrom(state, parseSquare('e6'))).toEqual([parseSquare('e5')]);
+  });
+
+  it('capturesFrom reads a neutral as used by the side to move, never against that side\'s own piece', () => {
+    // The neutral Scissors on e6 beats Paper by type, but Paper here belongs
+    // to Blue — the same side whose turn it is — and 4.2.3 forbids a neutral
+    // from taking the side using it.
+    const ownPaper = load('9/9/9/4nS4/4p4/9/9/9/9 blue', neutrals);
+    expect(capturesFrom(ownPaper, parseSquare('e6'))).toEqual([]);
+
+    // Red's Paper in the same spot is fair game for Blue's use of it.
+    const enemyPaper = load('9/9/9/4nS4/4P4/9/9/9/9 blue', neutrals);
+    expect(capturesFrom(enemyPaper, parseSquare('e6'))).toEqual([parseSquare('e5')]);
+    // And the reverse holds when it's Red's move instead — now Red can't
+    // use it against Red's own Paper.
+    const redToMove = load('9/9/9/4nS4/4P4/9/9/9/9 red', neutrals);
+    expect(capturesFrom(redToMove, parseSquare('e6'))).toEqual([]);
+  });
+
+  it('capturesFrom is empty for an empty square', () => {
+    const state = createGame(original);
+    expect(capturesFrom(state, parseSquare('e5'))).toEqual([]);
+  });
+
+  it('threatenedBy is empty for an empty square', () => {
+    const state = createGame(original);
+    expect(threatenedBy(state, parseSquare('e5'))).toEqual([]);
+  });
+
+  it("dangerAfter warns when the landing square is next to the piece's predator", () => {
+    // Blue Paper on d5 stepping to e5 lands beside Red's Scissors on e6.
+    const state = load('9/9/9/4S4/3p5/9/9/9/9 blue');
+    const move = legalMoves(state).find((m) => m.from === parseSquare('d5') && m.to === parseSquare('e5'))!;
+    expect(dangerAfter(state, move)).toBe(true);
+  });
+
+  it('dangerAfter is quiet when nothing beats the piece where it lands', () => {
+    const state = createGame(original);
+    const move = legalMoves(state)[0]!;
+    expect(dangerAfter(state, move)).toBe(false);
+  });
+
+  it('dangerAfter never flags a capture that removed the only threat', () => {
+    // Blue's Rock captures Red's Scissors on e6 — the only piece that could
+    // have threatened it there, gone the instant the capture happens.
+    const state = load('9/9/9/4S4/4r4/9/9/9/9 blue');
+    const move = legalMoves(state).find((m) => m.captured)!;
+    expect(dangerAfter(state, move)).toBe(false);
   });
 });
 

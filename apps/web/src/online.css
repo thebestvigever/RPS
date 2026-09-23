@@ -1,0 +1,111 @@
+/* Playing a friend by link (docs/ONLINE.md). Tokens only — every colour here
+   comes from styles.css, which is where the contrast gate can see it. */
+
+.online-screen {
+  max-width: 42rem;
+  margin: 0 auto;
+}
+
+.invite {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+  margin: 1rem 0;
+  flex-wrap: wrap;
+}
+
+.invite-link {
+  flex: 1 1 16rem;
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--grid);
+  border-radius: 8px;
+  background: var(--square);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.9rem;
+}
+
+.invite-link:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+/* The button sits beside the field rather than under it, so `.play`'s own
+   full width has to be overridden here rather than a second button style
+   existing. */
+.invite .play {
+  width: auto;
+  flex: 0 0 auto;
+  margin-top: 0;
+}
+
+.online-note {
+  font-size: 0.85rem;
+  margin-top: 1.5rem;
+}
+
+/* The banners sit above the board and are the only online-specific chrome on
+   the playing screen: everything else is the same board as offline. */
+.online-banners {
+  max-width: 42rem;
+  margin: 0 auto 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.online-banner {
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  border-left: 3px solid var(--blue);
+  border-radius: 4px;
+  background: var(--square);
+  color: var(--ink);
+  font-size: 0.9rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.online-banner--warn {
+  border-left-color: var(--alert);
+}
+
+.online-claims {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.online-claims button {
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--grid);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.online-claims button:hover {
+  background: var(--square-alt);
+}
+
+.online-claims button:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+/* Its own rule rather than `.stats-line` plus a colour: the two have equal
+   specificity, so which one won came down to which stylesheet Vite happened
+   to inject first — and `Online.tsx` importing this file makes that order the
+   module graph's business rather than this file's. An error that renders in
+   the muted grey of a statistics line is an error nobody reads. */
+.online-error {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: var(--red);
+}

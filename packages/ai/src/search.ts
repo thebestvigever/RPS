@@ -1,21 +1,35 @@
 // Search — spec 9.1.
 //
-// Negamax with alpha-beta pruning. Quiescence search at the leaves: only
-// captures and moves that reach the goal, up to 4 extra plies, with a stand-pat
-// score. Move ordering: captures first, then moves that bring the moving piece
-// closer to its goal, then the rest, with ties broken by the seeded generator.
+// Negamax with alpha-beta pruning. Quiescence search at the leaves: captures
+// and moves that reach the goal, up to 4 extra plies, with a stand-pat score —
+// PLUS, when the side to move has a piece attacked with no defender
+// (docs/engine/02-EVALUATION.md's "hanging"), the moves that walk it to safety.
+// Move ordering: captures first, then moves that bring the moving piece closer
+// to its goal, then the rest, with ties broken by the seeded generator.
+//
+// The extra case is the analogue of "no stand-pat while in check" (chess): a
+// hanging piece means captures alone would never find the move that actually
+// fixes the position, and the static score alone would just report the loss as
+// if it were unavoidable. See docs/engine/03-SEARCH.md §5 and
+// docs/engine/01-DIAGNOSIS.md for the measured cost of not doing this — Hard
+// left a piece hanging on 32.7% of its moves.
 //
 // This walks the board with make/unmake on one mutable Int8Array rather than
 // calling `applyMove`, which allocates a board and a Map per node and re-checks
 // sealing four times. Spec 7.2 sanctions exactly that for search. Move
-// generation and sealing still come from the engine, so there is only ever one
-// implementation of the rules.
+// generation, threat detection and sealing still come from the engine, so
+// there is only ever one implementation of the rules.
 
 import {
   EMPTY,
+  SQUARE_COUNT,
+  dangerAfter,
+  decodePiece,
+  defendersOf,
   isGoalSquare,
   legalMoves,
   other,
+  threatenedBy,
 } from '@sps/engine';
 import type { GameState, Move, Side, VariantConfig } from '@sps/engine';
 import { LEVELS, QUIESCENCE_MAX_PLIES } from './levels.js';
@@ -115,9 +129,51 @@ function outOfTime(context: Context): boolean {
 }
 
 /**
- * Only captures and winning moves, so the search doesn't stop on a position
- * where a piece is hanging. `moves` is passed in when the caller has already
- * generated it, which it has whenever it needed the no-moves check.
+ * Squares holding one of `mover`'s own pieces that is attacked and has no
+ * defender — the analogue of "in check" for `quiesce` below (03-SEARCH.md
+ * §5). A permanent piece never appears here: `threatenedBy` is already empty
+ * for it, since permanence means no predator exists anywhere on the board.
+ */
+function hangingSquaresOf(state: GameState, mover: Side): number[] {
+  const { board } = state;
+  const hanging: number[] = [];
+
+  for (let square = 0; square < SQUARE_COUNT; square++) {
+    const code = board[square]!;
+    if (code === EMPTY) continue;
+    if (decodePiece(code)!.owner !== mover) continue;
+    if (threatenedBy(state, square).length === 0) continue;
+    if (defendersOf(state, square).length > 0) continue;
+    hanging.push(square);
+  }
+
+  return hanging;
+}
+
+/**
+ * Quiet moves that walk a hanging piece to a square nothing attacks — the
+ * escapes half of the "in check" analogy. Captures are excluded; they are
+ * already in `quiesce`'s own tactical list.
+ */
+function evasions(context: Context, moves: Move[], hanging: readonly number[]): Move[] {
+  if (hanging.length === 0) return [];
+  const { scratch } = context;
+  const out: Move[] = [];
+
+  for (const move of moves) {
+    if (move.captured || !hanging.includes(move.from)) continue;
+    if (!dangerAfter(scratch, move)) out.push(move);
+  }
+
+  return out;
+}
+
+/**
+ * Captures and winning moves, so the search doesn't stop on a position where
+ * a piece is hanging — plus, when the mover already has a hanging piece, the
+ * moves that walk it to safety (see the header comment). `moves` is passed in
+ * when the caller has already generated it, which it has whenever it needed
+ * the no-moves check.
  */
 function quiesce(
   context: Context,
@@ -136,7 +192,17 @@ function quiesce(
 
   const standPat = evaluate(scratch, context.keepTerms);
   if (extra >= QUIESCENCE_MAX_PLIES || outOfTime(context)) return standPat;
-  if (standPat >= beta) return beta;
+
+  const hanging = hangingSquaresOf(scratch, mover);
+
+  // Stand-pat assumes the mover could do nothing further and be no worse off
+  // than the static score. That assumption is unsound exactly the way it is
+  // unsound "in check" in chess: there may be an escape worth far more than
+  // this static estimate, and captures alone would never find it. So a
+  // hanging piece disables the early cutoff below — but the static score,
+  // now that it prices the hang (docs/engine/02-EVALUATION.md), still stands
+  // as the fallback if no escape or capture helps.
+  if (hanging.length === 0 && standPat >= beta) return beta;
   if (standPat > alpha) alpha = standPat;
 
   // Only captures and winning moves are worth looking at here, and there are
@@ -147,6 +213,7 @@ function quiesce(
     if (winsNow(context, move, mover)) return terminalScore('win', depthFromRoot + 1);
     if (move.captured) tactical.push(move);
   }
+  if (hanging.length > 0) tactical.push(...evasions(context, moves, hanging));
 
   for (const move of orderMoves(context, tactical, mover)) {
     const captured = make(scratch.board, move);

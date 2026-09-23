@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import openingMoves from './fixtures/opening-moves.json' with { type: 'json' };
 import perftCounts from './fixtures/perft.json' with { type: 'json' };
-import tutorial from './fixtures/tutorial.json' with { type: 'json' };
+import tutorial from '../src/data/tutorial.json' with { type: 'json' };
 import vectors from './fixtures/vectors.json' with { type: 'json' };
 import {
   applyMove,

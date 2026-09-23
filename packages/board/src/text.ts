@@ -5,7 +5,7 @@
 // same way moveToText's grammar is — an app that speaks a different language
 // still wants these strings.
 
-import { beats } from '@sps/engine';
+import { beats, other } from '@sps/engine';
 import type { PieceType, Side } from '@sps/engine';
 
 const DISPLAY_NAME: Record<PieceType, string> = {
@@ -16,6 +16,11 @@ const DISPLAY_NAME: Record<PieceType, string> = {
 
 export function pieceTypeName(type: PieceType): string {
   return DISPLAY_NAME[type];
+}
+
+/** "Rocks", "Papers" — but "Scissors", not "Scissorss" (spec 10.5's panel copy). */
+function pluralTypeName(type: PieceType): string {
+  return type === 'scissors' ? DISPLAY_NAME.scissors : `${DISPLAY_NAME[type]}s`;
 }
 
 const SIDE_NAME: Record<Side, string> = { blue: 'Blue', red: 'Red' };
@@ -53,4 +58,34 @@ export function neutralSelectionText(
 export function illegalCaptureReason(attacker: PieceType, defender: PieceType): string {
   if (attacker === defender) return "Same type — can't capture";
   return `${pieceTypeName(defender)} beats ${pieceTypeName(attacker)}`;
+}
+
+/**
+ * The type-count aid's "consequence spelled out" (spec 10.5): "Red has no
+ * Paper left — Blue's Rocks are permanent." `outSide`/`outType` are whose
+ * count just hit zero — the permanent beneficiary is always the OTHER side,
+ * holding the type that `outType` used to prey on (`beats(outType)`), since
+ * a side's own pieces were never what threatened its own type.
+ *
+ * This is the two-side rule the spec's example gives; it does not account
+ * for a surviving neutral of the same type (4.2), which can keep the
+ * opponent's piece capturable even after both sides' own count reaches
+ * zero. Callers should gate this on the engine's own `isPermanent` for a
+ * piece of that type, not on the count alone.
+ */
+export function permanentPieceText(outSide: Side, outType: PieceType, names?: SideNames): string {
+  const permanentSide = other(outSide);
+  const permanentType = beats(outType);
+  return `${sideName(outSide, names)} has no ${pieceTypeName(outType)} left — ${sideName(permanentSide, names)}'s ${pluralTypeName(permanentType)} are permanent`;
+}
+
+/** The Keep's panel line (spec 7.6, 10.5): "Blue's corner is sealed — Red can't win by the corner." */
+export function keepLockText(sealedSide: Side, names?: SideNames): string {
+  return `${sideName(sealedSide, names)}'s corner is sealed — ${sideName(other(sealedSide), names)} can't win by the corner`;
+}
+
+/** The race meter's panel line (spec 10.5): "Nearest runner: 4 moves." `distance` is `nearestRunner`'s own return, including its `Infinity` for a side with nothing left. */
+export function raceMeterText(distance: number): string {
+  if (!Number.isFinite(distance)) return 'Nearest runner: none left';
+  return `Nearest runner: ${distance} move${distance === 1 ? '' : 's'}`;
 }

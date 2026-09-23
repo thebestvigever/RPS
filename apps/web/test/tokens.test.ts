@@ -76,7 +76,7 @@ describe('app colour tokens clear WCAG AA (spec 10.10)', () => {
   it('no stylesheet hard-codes a foreground on a filled accent', () => {
     // `color: white` is how this broke: it reads as obviously-correct on a
     // blue button and is wrong in whichever theme has the light accent.
-    const sheets = ['../src/styles.css', '../src/game.css'].map((path) =>
+    const sheets = ['../src/styles.css', '../src/game.css', '../src/online.css'].map((path) =>
       readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8'),
     );
     for (const sheet of sheets) {

@@ -142,3 +142,6 @@ export const CORNER_TINT_ALPHA = 0.14;
 
 /** Fraction alpha for the last move's origin/destination highlight (spec 10.5). */
 export const LAST_MOVE_TINT_ALPHA = 0.1;
+
+/** Fraction alpha for the hover highlight (spec 10.4/10.5) — subtler than the last-move tint, since it follows the mouse rather than marking something that happened. */
+export const HOVER_TINT_ALPHA = 0.07;
