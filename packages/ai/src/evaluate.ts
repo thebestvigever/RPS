@@ -91,7 +91,6 @@ import {
   beats,
   countsOf,
   decodePiece,
-  defendersOf,
   distance,
   EMPTY,
   goalSquares,
@@ -101,7 +100,7 @@ import {
   other,
   PIECE_TYPES,
   pieceListsOf,
-  threatenedBy,
+  predatorOf,
 } from '@sps/engine';
 import type { Counts, GameState, PieceLists, Side } from '@sps/engine';
 import { distanceTables } from './tables.js';
@@ -391,29 +390,52 @@ export function evaluate(
         side.cornerOccupants++;
       }
 
-      // Term 4: how many of this piece's neighbours are empty, summed over
-      // the side — the cheap proxy the doc allows in place of a real move
-      // count, which would mean generating moves a second time.
+      // Terms 1, 4 and 5 in one pass over this piece's neighbours, instead of
+      // three separate walks of the same up-to-8 squares (mobility here, plus
+      // the engine's own `threatenedBy` and `defendersOf`, each re-scanning
+      // and each allocating its own result array) — measured as most of
+      // evaluate()'s cost once the piece-list scan itself stopped being the
+      // bottleneck (docs/engine/04-SPEED.md §4/§5). A permanent piece has no
+      // predator anywhere on the board, so `threatened` is always false for
+      // it here, same as `threatenedBy` was already guaranteed empty before.
+      //
+      // `anyDefender`/`rearwardDefender` reproduce `coverBonus` exactly —
+      // "no defender" is 0, "some defender, none rearward" is `coverForward`,
+      // "at least one rearward" is `coverRearward` — without materialising a
+      // `Square[]` of defenders and mapping it to distances just to throw the
+      // squares away; `coverBonus` itself stays exported and tested as the
+      // formula's single definition.
+      const predator = predatorOf(type);
+      const guard = beats(type);
+      let threatened = false;
+      let anyDefender = false;
+      let rearwardDefender = false;
+
       const neighbours = NEIGHBOURS[square]!;
       for (const neighbour of neighbours) {
-        if (board[neighbour] === EMPTY) side.mobility++;
+        const neighbourCode = board[neighbour]!;
+        if (neighbourCode === EMPTY) {
+          side.mobility++;
+          continue;
+        }
+
+        const neighbourPiece = decodePiece(neighbourCode)!;
+        if (neighbourPiece.owner === owner) {
+          if (neighbourPiece.type === guard) {
+            anyDefender = true;
+            if (tables.toHome[owner][neighbour]! < toHome) rearwardDefender = true;
+          }
+        } else if (neighbourPiece.type === predator) {
+          threatened = true;
+        }
       }
 
-      // A permanent piece has no predator anywhere on the board, so
-      // `threatenedBy` is already guaranteed empty for it — nothing extra to
-      // check here for that case.
-      const defenders = defendersOf(state, square);
-      if (threatenedBy(state, square).length > 0) {
-        if (defenders.length > 0) side.contested++;
+      if (threatened) {
+        if (anyDefender) side.contested++;
         else side.hanging++;
       }
-
-      // Term 5: cover — see `coverBonus`.
-      if (defenders.length > 0) {
-        side.cover += coverBonus(
-          toHome,
-          defenders.map((d) => tables.toHome[owner][d]!),
-        );
+      if (anyDefender) {
+        side.cover += rearwardDefender ? WEIGHTS.coverRearward : WEIGHTS.coverForward;
       }
     }
   }
