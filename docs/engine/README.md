@@ -57,7 +57,11 @@ Full working, and how to reproduce every number: **[`01-DIAGNOSIS.md`](01-DIAGNO
 
 0. **Measurement harness** (`06`, part one). Engine-vs-engine matches with error
    bars, a tactical test suite, and the diagnosis metrics as a benchmark. Every
-   change below is the kind that feels better and isn't.
+   change below is the kind that feels better and isn't. **Shipped** — as
+   `tools/bench`, after step 1 rather than before it (Vig's report was the more
+   urgent problem); see `06`'s own status box for what landed and the two
+   differences from the plan (budget-bounded levels stand in for literal depth
+   pairs like "4 vs 8", and the endgame-puzzle source still waits on `05`).
 1. **Threat awareness** — `02` Term 1, plus `03` §5 (quiescence evasions). These
    two only work together, and together they are the answer to Vig's complaint.
    Biggest single jump in the whole folder. **Shipped** — see both docs' status

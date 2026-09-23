@@ -7,7 +7,44 @@
 
 ---
 
-# Part one — measurement
+# Part one — measurement — SHIPPED
+
+**Status: implemented**, as `tools/bench` (`@sps/bench`) — a new package
+alongside `tools/sim`, not a change to it: `tools/sim` stays the spec 9.6
+balance-guard tool (same level both sides, aggregate summary), and this is the
+engine-strength tool the "order to actually do it in" list asked to be built
+before `02`–`05` are trusted. `README.md`'s own order names this step 0; it
+shipped after step 1 (`02` Term 1, `03` §5) rather than before it, because
+Vig's report was the more urgent problem — but nothing in `02`–`05` past that
+point should land without running through this first.
+
+What's below is the plan as designed; three differences from it, upfront:
+
+* **§2's endgame-position source is not built.** It needs the tablebase from
+  `05-LEARNING-AND-TABLES.md`, which doesn't exist yet. The suite ships with
+  the other two sources only (40 puzzles: 24 defensive, 16 race) and grows
+  once `05` lands.
+* **§1 and §2 use the ladder's own named levels (Medium, Hard) rather than
+  literal depth pairs like "4 vs 8".** An honest, unbounded depth-5 search
+  already costs 37–115 seconds a position pre-`04-SPEED.md`/`03-SEARCH.md`
+  (`01-DIAGNOSIS.md` §3); depth 8 at that cost is hours for one position, let
+  alone the hundreds this is meant to generate from. Budget-bounded levels
+  keep match play and tactic generation finishing in seconds to minutes
+  instead, and are arguably the more direct check anyway — it's the levels a
+  player actually faces. Revisit with real fixed depths once `04`/`03` land.
+* **SPRT here is the trinomial (GSPRT) model**, not the pentanomial
+  refinement fishtest moved to later — BayesElo's two-parameter win/draw/loss
+  model with `drawelo` re-estimated from the match's own results. Simpler,
+  well-documented, and enough for bounds like [0, 5] Elo at this games/hour
+  budget.
+
+`pnpm bench match --a hard --b medium --sprt --elo0 0 --elo1 5`,
+`pnpm bench tactics --level hard`, and `pnpm bench diagnosis --level hard` are
+the three entry points; `tools/bench/src/cli.ts` has the full flag list.
+`chooseMove` (and `hangingSquaresOf`, the "hanging" definition the diagnosis
+metrics reuse rather than re-deriving) now accept a `LevelConfig` object as
+well as a named `Level`, which is what let this be built without duplicating
+the search.
 
 ## The rule
 
@@ -20,7 +57,20 @@ most hobby engines plateau.
 We need a much smaller version of the same thing. Build it **first**, before
 touching `evaluate.ts`.
 
-## 1. Engine-versus-engine matches
+## 1. Engine-versus-engine matches — SHIPPED
+
+**Status: implemented**, as `tools/bench/src/match.ts` (`runMatch`,
+`playGame`), `elo.ts` and `sprt.ts`. The config object is exactly
+`LevelConfig` — `chooseMove` now takes `Level | LevelConfig` — since the only
+per-side knobs that exist today are depth/time/jitter/`keepTerms`; "which
+evaluation terms" and "which search features" widen this same object as `02`
+Terms 2–6 and `03` land, not a new mechanism. The fast control is
+`fastControl()`, a `budgetMs` override. What differs from the plan as
+written: openings vary by seed (this game has one legal starting position per
+variant, §2.3) rather than a book of positions — colour-swapped pairs share a
+base seed so the branch the seed steers into, and any advantage from being
+first into it, is shared and cancelled the way a real opening-book pair would
+be. `01-DIAGNOSIS.md`'s SPRT test uses [0, 5] Elo bounds as the doc names.
 
 `tools/sim` already plays computer-vs-computer and already varies the seed per
 game and per ply so games diverge. What it cannot do is play **two different
@@ -45,7 +95,18 @@ What is needed:
   with colours reversed, which also cancels any first-player advantage from the
   result.
 
-## 2. A tactical test suite
+## 2. A tactical test suite — SHIPPED (two of three sources)
+
+**Status: implemented**, as `tools/bench/src/tactics.ts` (`runTactics`,
+`TACTIC_PUZZLES`) and `tools/bench/src/generate-tactics.ts`, which produced
+the committed `tools/bench/data/tactics.json` — 24 defensive positions, 16
+race positions. The endgame source below needs the tablebase (`05`) and isn't
+built. `moveToText` grading follows `TUTORIAL_PUZZLES` exactly, as suggested;
+a defensive puzzle accepts *any* legal move that saves the piece (there is
+usually more than one escape square) rather than a single canonical answer.
+`pnpm --filter @sps/bench exec vite-node src/generate-tactics.ts` regenerates
+the fixture — worth doing after a real evaluation or search change, to grow
+and refresh the sample.
 
 Chess has WAC and STS: positions with a known best move, scored as "how many does
 the engine find in N seconds." It catches regressions that match play is too
@@ -67,7 +128,18 @@ The repo already has the right shape for this: `TUTORIAL_PUZZLES` in
 `packages/engine/src/data/tutorial.json`, position plus expected move in §8.1
 notation, checked by comparing `moveToText` against the solution. Reuse it.
 
-## 3. Keep the metrics from the diagnosis
+## 3. Keep the metrics from the diagnosis — SHIPPED
+
+**Status: implemented**, as `tools/bench/src/diagnosis.ts` — `hangingRate`
+for the first two rows below, `depthAndSpeed` and `branchingFactor` for the
+rest. `pnpm bench diagnosis --level hard` runs all three. One difference: the
+"midgame" benchmark position isn't a frozen FEN — `midgamePosition()`
+self-plays Medium from the start to a given ply, deterministically from a
+seed, which means re-running this after a real change is also implicitly
+checking that the engine still reaches a comparable midgame at all, not
+comparing against a position a future rules or eval change might no longer
+produce. `branchingFactor` defaults to depth 1–4 for the reason `01` above
+does: depth 5 alone already costs 37–115 seconds a position pre-`04`/`03`.
 
 Turn `01-DIAGNOSIS.md`'s measurements into a permanent `tools/bench`:
 

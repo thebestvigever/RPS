@@ -21,6 +21,16 @@ export const LEVELS: Record<Level, LevelConfig> = {
   hard: { depth: 'iterative', minDepth: 3, jitter: 2, keepTerms: true, budgetMs: 1200 },
 };
 
+/**
+ * A named level, or a config of its own — docs/engine/06-MEASUREMENT-AND-LEVELS.md
+ * part one: engine-vs-engine matches need to play two configurations that aren't
+ * on the difficulty ladder (a candidate depth, a term flipped off), so
+ * `chooseMove` accepts either and resolves a name against `LEVELS` here.
+ */
+export function resolveLevelConfig(level: Level | LevelConfig): LevelConfig {
+  return typeof level === 'string' ? LEVELS[level] : level;
+}
+
 /** Show a "thinking" state for at least this long, so moves don't snap in (spec 9.3). */
 export const MIN_THINKING_MS = 350;
 

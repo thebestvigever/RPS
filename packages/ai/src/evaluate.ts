@@ -48,14 +48,15 @@
 import {
   EMPTY,
   SQUARE_COUNT,
+  countsOf,
   decodePiece,
   defendersOf,
+  isPermanentType,
   isSealed,
   other,
-  permanentMask,
   threatenedBy,
 } from '@sps/engine';
-import type { GameState, Side } from '@sps/engine';
+import type { Counts, GameState, Side } from '@sps/engine';
 import { distanceTables } from './tables.js';
 
 export const WEIGHTS = {
@@ -106,13 +107,23 @@ function riskOf(count: number, first: number, extra: number): number {
   return count === 0 ? 0 : first + (count - 1) * extra;
 }
 
-/** From the point of view of the side to move. */
-export function evaluate(state: GameState, keepTerms: boolean): number {
+/**
+ * From the point of view of the side to move.
+ *
+ * `counts` defaults to a fresh scan for callers with nothing better; the
+ * search maintains it incrementally in `make`/`unmake` and passes it in, so
+ * that permanence — nine integers, either zero or not — never costs a board
+ * scan or a `Uint8Array(81)` allocation here (docs/engine/04-SPEED.md §1).
+ */
+export function evaluate(
+  state: GameState,
+  keepTerms: boolean,
+  counts: Counts = countsOf(state.board),
+): number {
   const me = state.turn;
   const them = other(me);
   const { board, variant } = state;
   const tables = distanceTables(variant);
-  const permanent = permanentMask(state);
 
   const terms: Record<Side, SideTerms> = {
     blue: { pieces: 0, permanent: 0, nearest: NO_RUNNER, advancement: 0, permanentHome: 0, hanging: 0, contested: 0 },
@@ -123,7 +134,8 @@ export function evaluate(state: GameState, keepTerms: boolean): number {
     const code = board[square]!;
     if (code === EMPTY) continue;
 
-    const owner = decodePiece(code)!.owner;
+    const piece = decodePiece(code)!;
+    const owner = piece.owner;
     if (owner === 'neutral') continue;
 
     const side = terms[owner];
@@ -133,7 +145,7 @@ export function evaluate(state: GameState, keepTerms: boolean): number {
     if (toGoal < side.nearest) side.nearest = toGoal;
     side.advancement += (9 - toGoal) ** 2;
 
-    if (permanent[square]) {
+    if (isPermanentType(counts, owner, piece.type)) {
       side.permanent++;
       side.permanentHome += 8 - tables.toHome[owner][square]!;
     }
@@ -167,8 +179,8 @@ export function evaluate(state: GameState, keepTerms: boolean): number {
   if (keepTerms) {
     // A corner can only be sealed by a permanent piece, and the counts above
     // already say whether one exists — so most nodes skip the search entirely.
-    if (mine.permanent > 0 && isSealed(state, me)) score += WEIGHTS.sealed;
-    if (theirs.permanent > 0 && isSealed(state, them)) score -= WEIGHTS.sealed;
+    if (mine.permanent > 0 && isSealed(state, me, counts)) score += WEIGHTS.sealed;
+    if (theirs.permanent > 0 && isSealed(state, them, counts)) score -= WEIGHTS.sealed;
     score += WEIGHTS.permanentHome * (mine.permanentHome - theirs.permanentHome);
   }
 

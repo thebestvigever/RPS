@@ -109,6 +109,15 @@ importers:
         specifier: workspace:*
         version: link:../match
 
+  tools/bench:
+    dependencies:
+      '@sps/ai':
+        specifier: workspace:*
+        version: link:../../packages/ai
+      '@sps/engine':
+        specifier: workspace:*
+        version: link:../../packages/engine
+
   tools/sim:
     dependencies:
       '@sps/ai':

@@ -16,7 +16,7 @@ import {
   VARIANTS,
 } from '@sps/engine';
 import type { GameState, Side } from '@sps/engine';
-import { analyseRoot, chooseMove, NoMovesError } from '../src/search.js';
+import { analyseRoot, chooseMove, hangingSquaresOf, NoMovesError } from '../src/search.js';
 import { LEVELS } from '../src/levels.js';
 import type { Level } from '../src/levels.js';
 
@@ -77,6 +77,19 @@ describe('choosing a move', () => {
   it.each(VARIANT_IDS)('plays %s', (id) => {
     const state = createGame(getVariant(id));
     expect(() => chooseMove(state, 'medium', 1)).not.toThrow();
+  });
+
+  it('accepts a LevelConfig that is not on the ladder, not just a named level', () => {
+    // docs/engine/06-MEASUREMENT-AND-LEVELS.md part one: engine-vs-engine
+    // matches need to play a candidate configuration head-to-head, so a match
+    // runner has to be able to hand `chooseMove` something that isn't 'easy',
+    // 'medium' or 'hard'.
+    const state = createGame(original);
+    const config = { depth: 3, minDepth: 3, jitter: 0, keepTerms: true, budgetMs: 400 };
+    const { move, stats } = chooseMove(state, config, 1);
+    const legal = legalMoves(state);
+    expect(legal.some((m) => m.from === move.from && m.to === move.to)).toBe(true);
+    expect(stats.depth).toBe(3);
   });
 });
 
@@ -243,6 +256,15 @@ describe('defence (docs/engine/01-DIAGNOSIS.md)', () => {
     return squares;
   }
 
+  it('exports the same hanging-square definition, for tools built on it', () => {
+    // docs/engine/06-MEASUREMENT-AND-LEVELS.md part one's diagnosis metrics
+    // (tools/bench) reuse this rather than re-deriving "hanging" a third time.
+    // Cross-checked against the independent oracle above, not against itself.
+    const state = load('9/9/9/3PRS3/4r4/9/9/9/9 blue');
+    expect(hangingSquaresOf(state, 'blue')).toEqual(hangingSquares(state, 'blue'));
+    expect(hangingSquaresOf(state, 'red')).toEqual(hangingSquares(state, 'red'));
+  });
+
   // Deliberately NOT a self-play statistical test. An earlier version of this
   // test played full self-play games and asserted an aggregate hanging rate —
   // it cost 8+ minutes (Hard's own 1.2s/move budget, times many plies, times
@@ -269,7 +291,20 @@ describe('defence (docs/engine/01-DIAGNOSIS.md)', () => {
       // marching that Rock home and seal the Keep instead (+3000, dwarfing
       // one Paper), which is the right move, not a bug. An earlier version
       // of this test missed that and "failed" on exactly that false alarm.
-      const state = load('9/9/9/4S4/r3p4/9/9/9/8P blue');
+      //
+      // Blue's second Rock on g1 is load-bearing too, added for
+      // 03-SEARCH.md §1-4/§6: with only two Blue pieces on an open board,
+      // Hard's transposition table and PVS reach real depth 8 in budget
+      // (versus depth 3-4 before that work) and find that a lone Paper
+      // fleeing a same-speed Scissors, with Blue's only other piece forced
+      // to shuffle nearby every turn (no passing, 2.4), can be run down
+      // over several more plies — so escaping and abandoning it converge to
+      // near-identical scores, and which one Hard plays becomes an
+      // arbitrary tie-break, not a verdict on the mechanism. A third piece
+      // is enough slack that the true, deep-searched value clearly favours
+      // escaping again, the same way it does at the shallower depths this
+      // test used to be limited to.
+      const state = load('9/9/9/4S4/r3p4/9/9/9/6r1P blue');
       const { move } = chooseMove(state, level, 21);
       const after = applyMove(state, move).state;
 

@@ -65,7 +65,14 @@ export {
 export { goalSquares, homeSquares, isGoalSquare } from './goals.js';
 
 export { moveToText, parseMove } from './notation.js';
-export { findLegalMove, isLegal, legalMoves } from './moves.js';
+export { findLegalMove, isLegal, legalMoves, movesFromPieceLists } from './moves.js';
+export type { PieceLists } from './pieceList.js';
+export {
+  insertIntoPieceLists,
+  pieceListsOf,
+  relocateInPieceLists,
+  removeFromPieceLists,
+} from './pieceList.js';
 export {
   abandon,
   abortGame,
@@ -91,13 +98,16 @@ export {
   encodeRecord,
 } from './share.js';
 
+export type { Counts } from './analysis.js';
 export {
   canHoldSeal,
   capturesFrom,
+  countsOf,
   dangerAfter,
   defendersOf,
   distanceToGoal,
   isPermanent,
+  isPermanentType,
   isSealed,
   nearestRunner,
   nearestRunnerSquare,

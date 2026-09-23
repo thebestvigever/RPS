@@ -6,7 +6,53 @@
 
 import { NEIGHBOURS, SQUARE_COUNT } from './board.js';
 import { EMPTY, beats, decodePiece } from './pieces.js';
-import type { GameState, Move, MoveInput } from './types.js';
+import type { PieceLists } from './pieceList.js';
+import type { GameState, Move, Side, Square } from './types.js';
+import type { MoveInput } from './types.js';
+
+/**
+ * Every move a single piece on `from` can make, appended to `moves` — the one
+ * place the rules of §2.6/4.2.2-4.2.3 are written down. Both `legalMoves`
+ * (walks every square) and `movesFromPieceLists` (walks only the mover's own
+ * squares, docs/engine/04-SPEED.md §2) call this, so there is exactly one
+ * implementation to keep in sync with the spec.
+ */
+function pushMovesFrom(
+  moves: Move[],
+  board: Int8Array,
+  from: Square,
+  me: Side,
+  usableNeutral: boolean,
+): void {
+  const code = board[from]!;
+  const piece = decodePiece(code)!;
+  const beaten = beats(piece.type);
+
+  for (const to of NEIGHBOURS[from]!) {
+    const targetCode = board[to]!;
+
+    if (targetCode === EMPTY) {
+      // A neutral never walks (4.2.2).
+      if (usableNeutral) continue;
+      moves.push({ from, to, piece, captured: null });
+      continue;
+    }
+
+    const target = decodePiece(targetCode)!;
+
+    // Your own piece; or, for a neutral, another neutral (4.2.3).
+    if (target.owner === piece.owner) continue;
+
+    // A neutral you use can't capture your own pieces (4.2.3).
+    if (usableNeutral && target.owner === me) continue;
+
+    // Anything else is legal only if this type beats it. Same type, or a
+    // target that beats the mover, is illegal (2.6).
+    if (target.type === beaten) {
+      moves.push({ from, to, piece, captured: target });
+    }
+  }
+}
 
 export function legalMoves(state: GameState): Move[] {
   if (state.result) return [];
@@ -24,31 +70,43 @@ export function legalMoves(state: GameState): Move[] {
     const usableNeutral = piece.owner === 'neutral' && neutralsPlay;
     if (!mine && !usableNeutral) continue;
 
-    const beaten = beats(piece.type);
+    pushMovesFrom(moves, board, from, me, usableNeutral);
+  }
 
-    for (const to of NEIGHBOURS[from]!) {
-      const targetCode = board[to]!;
+  return moves;
+}
 
-      if (targetCode === EMPTY) {
-        // A neutral never walks (4.2.2).
-        if (usableNeutral) continue;
-        moves.push({ from, to, piece, captured: null });
-        continue;
-      }
+/**
+ * Same legal moves as `legalMoves`, as a set, but found by walking a piece
+ * list instead of all 81 squares (docs/engine/04-SPEED.md §2) — for a caller
+ * that already maintains one incrementally, such as the AI search's hot path.
+ * `packages/engine/test/pieceList.test.ts` asserts this agrees with
+ * `legalMoves` on every fixture and perft position, so there is still only
+ * one set of rules, just two ways to walk up to them.
+ *
+ * The move order is not the same as `legalMoves` (square-ascending) — it
+ * follows the piece list's own order, which changes under swap-removal. No
+ * caller may rely on `legalMoves`'s order from this function; use
+ * `legalMoves` itself when that matters (fixtures, replays, notation).
+ */
+export function movesFromPieceLists(state: GameState, lists: PieceLists): Move[] {
+  if (state.result) return [];
 
-      const target = decodePiece(targetCode)!;
+  const { board, turn: me, variant } = state;
+  const neutralsPlay = variant.neutrals !== false;
+  const moves: Move[] = [];
 
-      // Your own piece; or, for a neutral, another neutral (4.2.3).
-      if (target.owner === piece.owner) continue;
+  const mine = lists.squares[me];
+  const mineCount = lists.count[me];
+  for (let i = 0; i < mineCount; i++) {
+    pushMovesFrom(moves, board, mine[i]!, me, false);
+  }
 
-      // A neutral you use can't capture your own pieces (4.2.3).
-      if (usableNeutral && target.owner === me) continue;
-
-      // Anything else is legal only if this type beats it. Same type, or a
-      // target that beats the mover, is illegal (2.6).
-      if (target.type === beaten) {
-        moves.push({ from, to, piece, captured: target });
-      }
+  if (neutralsPlay) {
+    const neutrals = lists.squares.neutral;
+    const neutralCount = lists.count.neutral;
+    for (let i = 0; i < neutralCount; i++) {
+      pushMovesFrom(moves, board, neutrals[i]!, me, true);
     }
   }
 

@@ -8,53 +8,69 @@ import { EMPTY, beats, decodePiece, other, predatorOf } from './pieces.js';
 import type { GameState, Move, Owner, PieceType, Side, Square } from './types.js';
 
 /**
- * Which owner holds which types, as a 3x3 lookup. Built once per query so that
- * permanence is O(1) per piece rather than a board scan — `isSealed` asks for
- * every square, and the AI asks for every node.
+ * How many of each type each owner holds, as a 3x3 table. Permanence is a
+ * question about whether a count is zero, not about where any piece sits, so
+ * this is the whole input `permanentGiven` needs — nine integers instead of an
+ * 81-square scan. `countsOf` builds the table by scanning the board once;
+ * callers that already track it incrementally (the AI search, `make`/`unmake`
+ * one line each) skip that scan entirely and pass their own.
  */
-type Presence = Record<Owner, Record<PieceType, boolean>>;
+export type Counts = Record<Owner, Record<PieceType, number>>;
 
-function presenceOf(board: Int8Array): Presence {
-  const presence: Presence = {
-    blue: { rock: false, paper: false, scissors: false },
-    red: { rock: false, paper: false, scissors: false },
-    neutral: { rock: false, paper: false, scissors: false },
+export function countsOf(board: Int8Array): Counts {
+  const counts: Counts = {
+    blue: { rock: 0, paper: 0, scissors: 0 },
+    red: { rock: 0, paper: 0, scissors: 0 },
+    neutral: { rock: 0, paper: 0, scissors: 0 },
   };
   for (let square = 0; square < SQUARE_COUNT; square++) {
     const code = board[square]!;
     if (code === EMPTY) continue;
     const piece = decodePiece(code)!;
-    presence[piece.owner][piece.type] = true;
+    counts[piece.owner][piece.type]++;
   }
-  return presence;
+  return counts;
 }
 
-function permanentGiven(presence: Presence, owner: Owner, type: PieceType): boolean {
+/**
+ * Is a piece of this owner and type permanent, given a type census? The
+ * per-piece form of `permanentMask`, for a caller walking its own pieces (the
+ * AI's evaluation, per docs/engine/04-SPEED.md §1) that would rather ask this
+ * directly than have a whole-board mask built and allocated for it.
+ */
+export function isPermanentType(counts: Counts, owner: Owner, type: PieceType): boolean {
+  return permanentGiven(counts, owner, type);
+}
+
+function permanentGiven(counts: Counts, owner: Owner, type: PieceType): boolean {
   const predator = predatorOf(type);
   if (owner === 'neutral') {
     // Either side may capture a neutral their type beats (4.2.4).
-    return !presence.blue[predator] && !presence.red[predator];
+    return counts.blue[predator] === 0 && counts.red[predator] === 0;
   }
   // The opponent's own pieces, or a neutral they fire at you — a neutral you
   // use can't take your own pieces, so your own neutrals are no threat (4.2.3).
-  return !presence[other(owner)][predator] && !presence.neutral[predator];
+  return counts[other(owner)][predator] === 0 && counts.neutral[predator] === 0;
 }
 
 /**
  * Permanence for every square in one pass: 1 where a piece can no longer be
  * captured, 0 elsewhere. The bulk form of `isPermanent`, for callers that need
  * the whole board — the AI's evaluation asks on every node (9.2).
+ *
+ * `counts` defaults to a fresh scan for callers with nothing better; a caller
+ * that already maintains counts incrementally should pass them and skip that
+ * scan (docs/engine/04-SPEED.md §1).
  */
-export function permanentMask(state: GameState): Uint8Array {
+export function permanentMask(state: GameState, counts: Counts = countsOf(state.board)): Uint8Array {
   const { board } = state;
-  const presence = presenceOf(board);
   const mask = new Uint8Array(SQUARE_COUNT);
 
   for (let square = 0; square < SQUARE_COUNT; square++) {
     const code = board[square]!;
     if (code === EMPTY) continue;
     const piece = decodePiece(code)!;
-    if (permanentGiven(presence, piece.owner, piece.type)) mask[square] = 1;
+    if (permanentGiven(counts, piece.owner, piece.type)) mask[square] = 1;
   }
 
   return mask;
@@ -75,12 +91,16 @@ function assertSquare(square: Square): void {
  * the opponent holds no piece of its predator type, and no neutral of that type
  * remains. An empty square is not permanent.
  */
-export function isPermanent(state: GameState, square: Square): boolean {
+export function isPermanent(
+  state: GameState,
+  square: Square,
+  counts: Counts = countsOf(state.board),
+): boolean {
   assertSquare(square);
   const code = state.board[square]!;
   if (code === EMPTY) return false;
   const piece = decodePiece(code)!;
-  return permanentGiven(presenceOf(state.board), piece.owner, piece.type);
+  return permanentGiven(counts, piece.owner, piece.type);
 }
 
 /**
@@ -95,10 +115,13 @@ export function isPermanent(state: GameState, square: Square): boolean {
  * as its pieces stay put, so this is re-checked after every move rather than
  * remembered.
  */
-export function isSealed(state: GameState, side: Side): boolean {
+export function isSealed(
+  state: GameState,
+  side: Side,
+  counts: Counts = countsOf(state.board),
+): boolean {
   const { board, variant } = state;
   const attacker = other(side);
-  const presence = presenceOf(board);
 
   const wall = new Uint8Array(SQUARE_COUNT);
   const seen = new Uint8Array(SQUARE_COUNT);
@@ -110,7 +133,7 @@ export function isSealed(state: GameState, side: Side): boolean {
     if (code === EMPTY) continue;
     const piece = decodePiece(code)!;
     if (piece.owner === side) {
-      if (permanentGiven(presence, side, piece.type)) {
+      if (permanentGiven(counts, side, piece.type)) {
         wall[square] = 1;
         wallSize++;
       }

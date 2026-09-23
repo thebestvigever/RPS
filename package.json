@@ -15,7 +15,8 @@
     "test:watch": "vitest",
     "dev": "pnpm --filter @sps/web dev",
     "dev:server": "pnpm --filter @sps/server dev",
-    "sim": "pnpm --filter @sps/sim start --"
+    "sim": "pnpm --filter @sps/sim start --",
+    "bench": "pnpm --filter @sps/bench start --"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

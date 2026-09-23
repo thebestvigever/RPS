@@ -1,0 +1,15 @@
+{
+  "name": "@sps/bench",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Engine-vs-engine matches, a tactical test suite, and the diagnosis metrics — docs/engine/06-MEASUREMENT-AND-LEVELS.md part one.",
+  "scripts": {
+    "start": "vite-node src/cli.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@sps/ai": "workspace:*",
+    "@sps/engine": "workspace:*"
+  }
+}
