@@ -106,6 +106,7 @@ export {
   dangerAfter,
   defendersOf,
   distanceToGoal,
+  exchangeOn,
   isPermanent,
   isPermanentType,
   isSealed,

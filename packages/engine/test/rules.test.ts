@@ -9,6 +9,7 @@ import {
   createGame,
   dangerAfter,
   defendersOf,
+  exchangeOn,
   fromFen,
   getVariant,
   IllegalMoveError,
@@ -492,6 +493,43 @@ describe('information aids (spec 10.5)', () => {
     const state = load('9/9/9/4S4/4r4/9/9/9/9 blue');
     const move = legalMoves(state).find((m) => m.captured)!;
     expect(dangerAfter(state, move)).toBe(false);
+  });
+
+  it('exchangeOn is 0 for an empty square', () => {
+    const state = createGame(original);
+    expect(exchangeOn(state, parseSquare('e5'), 'blue')).toBe(0);
+  });
+
+  it('exchangeOn is +1 for a free capture nothing recaptures', () => {
+    // Blue Rock on d5 beats Red Scissors on e5; nothing of Red's is adjacent
+    // to recapture on e5 once the Rock lands there.
+    const state = load('9/9/9/9/3rS4/9/9/9/9 blue');
+    expect(exchangeOn(state, parseSquare('e5'), 'blue')).toBe(1);
+  });
+
+  it('exchangeOn is 0 for a defended piece — the exchange evens out', () => {
+    // Blue Rock takes Red's Scissors on e5, but Red's Paper on e6 (Rock's
+    // predator) recaptures right back: one piece each, net zero.
+    const state = load('9/9/9/4P4/3rS4/9/9/9/9 blue');
+    expect(exchangeOn(state, parseSquare('e5'), 'blue')).toBe(0);
+  });
+
+  it('exchangeOn is negative for a capture that only sets up a recapture', () => {
+    // Blue's Rock takes a neutral Scissors on e5 for free (a neutral is not
+    // material for anyone, spec 4.2.5) — but Red's Paper on e6 then
+    // recaptures the Rock: nothing gained, one Rock lost.
+    const state = load('9/9/9/4P4/3rnS4/9/9/9/9 blue', neutrals);
+    expect(exchangeOn(state, parseSquare('e5'), 'blue')).toBe(-1);
+  });
+
+  it('exchangeOn walks a longer chain around the cycle, both sides recapturing in turn', () => {
+    // e5 Red Scissors, taken by Blue Rock (d5); Blue's Rock taken by Red
+    // Paper (e6); Red's Paper taken by Blue's Scissors (e4) — two pieces
+    // lost on each side, but Blue captured last: net +1 for Blue.
+    const state = load('9/9/9/4P4/3rS4/4s4/9/9/9 blue');
+    expect(exchangeOn(state, parseSquare('e5'), 'blue')).toBe(1);
+    // The same walk from Red's side of it is the exact negation.
+    expect(exchangeOn(state, parseSquare('e5'), 'red')).toBe(-1);
   });
 });
 

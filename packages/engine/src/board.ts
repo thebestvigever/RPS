@@ -80,3 +80,32 @@ export function neighbours(square: Square): readonly Square[] {
   if (!list) throw new Error(`Not a square index: ${square}`);
   return list;
 }
+
+/**
+ * `NEIGHBOURS` flattened into one `Int8Array`, with `NEIGHBOUR_OFFSETS[square]`
+ * .. `NEIGHBOUR_OFFSETS[square + 1]` marking each square's slice — an array of
+ * arrays is an extra indirection and allocation per square that the engine's
+ * own hot loops (move generation, `isSealed`'s walk, threat detection) don't
+ * need to pay for on every node (docs/engine/04-SPEED.md §5). Internal only:
+ * `NEIGHBOURS` stays the public shape everything else reads.
+ */
+function computeFlatNeighbours(): { offsets: Int32Array; flat: Int8Array } {
+  const offsets = new Int32Array(SQUARE_COUNT + 1);
+  let total = 0;
+  for (let square = 0; square < SQUARE_COUNT; square++) {
+    offsets[square] = total;
+    total += NEIGHBOURS[square]!.length;
+  }
+  offsets[SQUARE_COUNT] = total;
+
+  const flat = new Int8Array(total);
+  let i = 0;
+  for (let square = 0; square < SQUARE_COUNT; square++) {
+    for (const to of NEIGHBOURS[square]!) flat[i++] = to;
+  }
+
+  return { offsets, flat };
+}
+
+const { offsets: NEIGHBOUR_OFFSETS, flat: NEIGHBOUR_FLAT } = computeFlatNeighbours();
+export { NEIGHBOUR_FLAT, NEIGHBOUR_OFFSETS };

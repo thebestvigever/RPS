@@ -1,6 +1,6 @@
 // Derived facts the interface and the AI both need — spec 2.10 and 7.6.
 
-import { NEIGHBOURS, SQUARE_COUNT, distance } from './board.js';
+import { NEIGHBOUR_FLAT, NEIGHBOUR_OFFSETS, SQUARE_COUNT, distance } from './board.js';
 import { tallySides } from './fen.js';
 import { goalSquares, homeSquares } from './goals.js';
 import { legalMoves } from './moves.js';
@@ -158,7 +158,9 @@ export function isSealed(
     const square = queue[head]!;
     if (goals.includes(square)) return false;
 
-    for (const next of NEIGHBOURS[square]!) {
+    const end = NEIGHBOUR_OFFSETS[square + 1]!;
+    for (let i = NEIGHBOUR_OFFSETS[square]!; i < end; i++) {
+      const next = NEIGHBOUR_FLAT[i]!;
       if (seen[next] || wall[next]) continue;
       seen[next] = 1;
       queue.push(next);
@@ -284,7 +286,9 @@ export function threatenedBy(state: GameState, square: Square): Square[] {
   const predator = predatorOf(piece.type);
 
   const threats: Square[] = [];
-  for (const neighbour of NEIGHBOURS[square]!) {
+  const end = NEIGHBOUR_OFFSETS[square + 1]!;
+  for (let i = NEIGHBOUR_OFFSETS[square]!; i < end; i++) {
+    const neighbour = NEIGHBOUR_FLAT[i]!;
     const neighbourCode = state.board[neighbour]!;
     if (neighbourCode === EMPTY) continue;
     const attacker = decodePiece(neighbourCode)!;
@@ -314,7 +318,9 @@ export function defendersOf(state: GameState, square: Square): Square[] {
   const guard = beats(piece.type);
 
   const defenders: Square[] = [];
-  for (const neighbour of NEIGHBOURS[square]!) {
+  const end = NEIGHBOUR_OFFSETS[square + 1]!;
+  for (let i = NEIGHBOUR_OFFSETS[square]!; i < end; i++) {
+    const neighbour = NEIGHBOUR_FLAT[i]!;
     const neighbourCode = state.board[neighbour]!;
     if (neighbourCode === EMPTY) continue;
     const friend = decodePiece(neighbourCode)!;
@@ -322,6 +328,80 @@ export function defendersOf(state: GameState, square: Square): Square[] {
     if (friend.type === guard) defenders.push(neighbour);
   }
   return defenders;
+}
+
+/**
+ * Static exchange evaluation for `square`, from `perspective`'s side of it
+ * (docs/engine/02-EVALUATION.md Term 1, "left on the table," and needed by
+ * Term 3 and `03-SEARCH.md` §5-6 for capture ordering) — the net pieces
+ * `perspective` ends up up (positive) or down (negative) if captures on
+ * `square` keep happening for as long as one is available. A caller ordering
+ * a candidate capture move passes the mover's own side.
+ *
+ * Chess SEE sorts attackers by value and recaptures with the cheapest; here
+ * every piece is worth the same and only *type* decides who may capture, so
+ * the walk is simpler: whoever sits on `square` can be taken only by the one
+ * type that beats them (`predatorOf`), and by the cycle identity
+ * `predator(predator(t)) === beats(t)`, the piece that just captured is in
+ * turn exactly the type its OWN side defends with — so the sequence is a walk
+ * around the three-way cycle, occupant-type in the same order every time,
+ * alternating whichever side has a piece adjacent to capture next. It
+ * terminates in at most a handful of steps: each step consumes one of
+ * `square`'s (at most 8) neighbours, and none is reused.
+ *
+ * This always plays every available capture through to the end rather than
+ * letting either side choose to stop partway — a real player might decline a
+ * losing recapture, which a full minimax-over-the-sequence would model. The
+ * doc asks for the simpler walk ("it terminates in at most a handful of
+ * steps, and it is genuinely simpler than chess's version"), so this
+ * overstates how bad a walk can get for whichever side would rationally have
+ * stopped early — a caller that only needs the *sign* (good/bad capture, per
+ * `03-SEARCH.md` §5-6) is unaffected by that in the common case, since a
+ * side never walks into a chain that starts by losing material for free.
+ *
+ * A neutral piece is not material for either side (spec 4.2.5, and
+ * `evaluate()` never counts one as a piece), so capturing or losing one
+ * contributes nothing to the total — including the very first step, when
+ * `square` itself holds a neutral, which is also the one case where the walk
+ * cannot tell which side's piece struck first if both could have: that first
+ * step is free for `perspective` either way, so it does not need to know.
+ */
+export function exchangeOn(state: GameState, square: Square, perspective: Side): number {
+  assertSquare(square);
+  const code = state.board[square]!;
+  if (code === EMPTY) return 0;
+
+  const used = new Uint8Array(SQUARE_COUNT);
+  let occupant = decodePiece(code)!;
+  let net = 0;
+
+  for (;;) {
+    const neededType = predatorOf(occupant.type);
+    let attacker: Square = -1;
+
+    const end = NEIGHBOUR_OFFSETS[square + 1]!;
+    for (let i = NEIGHBOUR_OFFSETS[square]!; i < end; i++) {
+      const neighbour = NEIGHBOUR_FLAT[i]!;
+      if (used[neighbour]) continue;
+      const neighbourCode = state.board[neighbour]!;
+      if (neighbourCode === EMPTY) continue;
+      const piece = decodePiece(neighbourCode)!;
+      if (piece.owner === occupant.owner) continue;
+      if (piece.type !== neededType) continue;
+      attacker = neighbour;
+      break;
+    }
+
+    if (attacker < 0) break;
+    used[attacker] = 1;
+
+    if (occupant.owner === perspective) net -= 1;
+    else if (occupant.owner !== 'neutral') net += 1;
+
+    occupant = decodePiece(state.board[attacker]!)!;
+  }
+
+  return net;
 }
 
 /**

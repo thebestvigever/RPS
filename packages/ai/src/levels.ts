@@ -18,7 +18,7 @@ export interface LevelConfig {
 export const LEVELS: Record<Level, LevelConfig> = {
   easy: { depth: 1, minDepth: 1, jitter: 60, keepTerms: false, budgetMs: 150 },
   medium: { depth: 2, minDepth: 2, jitter: 8, keepTerms: true, budgetMs: 400 },
-  hard: { depth: 'iterative', minDepth: 3, jitter: 2, keepTerms: true, budgetMs: 1200 },
+  hard: { depth: 'iterative', minDepth: 3, jitter: 2, keepTerms: true, budgetMs: 5000 },
 };
 
 /**

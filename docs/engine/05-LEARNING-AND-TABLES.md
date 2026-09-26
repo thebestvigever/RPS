@@ -133,8 +133,14 @@ of engine building where you can be *certain* you are right.
 * **Store depth, not just the verdict.** A win/draw/loss table alone makes an
   engine shuffle forever in a won position. Store distance-to-win as well, or
   keep searching and use the table only as a leaf oracle.
-* **Neutrals need their own tables.** A neutral piece is a fourth "owner" and
-  multiplies the kind count. Do Original first.
+* **Neutrals are out of scope.** A neutral piece is a fourth "owner" — it
+  multiplies the kind count (6 kinds → 9) and needs its own capture-only move
+  rule inside the generator, not just a different goal mask.
+  **Decision (2026-09-23, Vig): the tablebase project does not cover
+  Neutrals.** Original and 2×2 Corner share one piece-kind space (blue/red ×
+  rock/paper/scissors, no neutral owner) and differ only in goal squares, so a
+  single generator serves both — run it once per goal geometry. A Neutrals
+  table is a separate future decision, not part of this plan.
 
 **Where this pays off in real games.** §6.2: 68% of games see one side lose every
 piece of a type, and §6.3's Keep positions are exactly low-piece endings where a
@@ -193,6 +199,7 @@ Read: alpha-beta is the right backbone for this game. Spend the effort on §1–
 2. **Texel tuning** — a few days, and it retires every hand-picked number in
    `02-EVALUATION.md`.
 3. **3-piece tablebase** — 2.3 MB, ships, makes the AI perfect in endings.
+   Original and 2×2 Corner only; Neutrals is out of scope (see caveats above).
 4. **4-piece tablebase as an oracle** — the single best validation tool available,
    and it makes everything above verifiable rather than believed.
 5. **A learned evaluation** — only if 1–4 are exhausted and someone still wants

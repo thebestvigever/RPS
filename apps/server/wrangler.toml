@@ -18,7 +18,7 @@ new_sqlite_classes = ["MatchRoom"]
 [vars]
 # Where the web app is served from, so an invite link points at the game and
 # not at this API. Set it per environment before sharing any link.
-APP_ORIGIN = "http://localhost:5173"
+APP_ORIGIN = "https://rps.sps-server.workers.dev"
 # Which origin may call the JSON endpoints from a browser. Narrow it in
 # production; the websocket is not subject to this either way.
-ALLOWED_ORIGIN = "*"
+ALLOWED_ORIGIN = "https://rps.sps-server.workers.dev"
