@@ -89,7 +89,7 @@
   position: relative; /* victim-overlay positions against this */
   touch-action: none; /* dragging shouldn't scroll the page on a phone */
 }
-.board-wrap:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.board-wrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .board-wrap svg { display: block; width: 100%; height: 100%; }
 
 /* Corner-anchored panels — the Bar layout (docs/VISUAL_SYSTEM.md 8): each
@@ -122,6 +122,7 @@
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
+  font-family: var(--font-heading);
   font-weight: 600;
   /* A custom pass-and-play name can run long; the dot must stay put and the
      text should clip rather than push the counts off the board's edge. */
@@ -136,10 +137,10 @@
   border-radius: 50%;
   background: currentColor;
 }
-.panel--blue .panel-dot { color: var(--blue); }
-.panel--red .panel-dot { color: var(--red); }
+.panel--blue .panel-dot { color: var(--accent); }
+.panel--red .panel-dot { color: var(--danger); }
 
-.panel-counts { display: flex; gap: 0.6rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.panel-counts { display: flex; gap: 0.6rem; font-family: var(--font-mono); }
 .count--last { color: var(--alert); }
 .count--out { color: var(--muted); text-decoration: line-through; }
 
@@ -184,13 +185,13 @@
   height: 40px;
   border-radius: 8px;
   border: 1px solid var(--grid);
-  background: var(--paper);
+  background: var(--page);
   color: var(--ink);
   font-size: 1.1rem;
   cursor: pointer;
 }
 .bar button:disabled { opacity: 0.35; cursor: not-allowed; }
-.bar button.resign { color: var(--red); border-color: var(--red); }
+.bar button.resign { color: var(--danger); border-color: var(--danger); }
 
 .game-over {
   width: var(--board-px, 100%);
@@ -201,7 +202,7 @@
   border-radius: 8px;
   text-align: center;
 }
-.game-over-result { margin: 0 0 0.6rem; font-weight: 600; }
+.game-over-result { margin: 0 0 0.6rem; font-family: var(--font-heading); font-weight: 600; }
 
 /* Spec 10.7's "moves played, captures each side". A row of labelled numbers
    reads at a glance where a sentence would have to be parsed. */
@@ -217,7 +218,7 @@
 .game-over-facts dd {
   margin: 0;
   font-weight: 600;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
 }
 
 .game-over-extinct { margin: 0 0 0.6rem; font-size: 0.85rem; color: var(--muted); }
@@ -234,7 +235,7 @@
   padding: 0.5rem 0.9rem;
   border: 1px solid var(--grid);
   border-radius: 8px;
-  background: var(--paper);
+  background: var(--page);
   color: var(--ink);
   font: inherit;
   cursor: pointer;
@@ -245,8 +246,8 @@
 .game-over-buttons .play {
   width: auto;
   margin: 0;
-  border: 1px solid var(--blue);
-  background: var(--blue);
+  border: 1px solid var(--accent);
+  background: var(--accent);
   color: var(--on-fill);
 }
 
@@ -287,17 +288,17 @@
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 0.9rem;
   padding: 0.15rem 0.5rem;
   border-radius: 6px;
-  background: var(--square-alt);
+  background: var(--panel-alt);
 }
-.clock-chip--running { background: var(--blue); color: var(--on-fill); }
+.clock-chip--running { background: var(--accent); color: var(--on-fill); }
 .clock-chip--low { color: var(--alert); }
 .clock-chip--running.clock-chip--low { background: var(--alert); color: var(--on-fill); }
-.clock-chip--critical { color: var(--red); font-weight: 700; }
-.clock-chip--running.clock-chip--critical { background: var(--red); color: var(--on-fill); }
+.clock-chip--critical { color: var(--danger); font-weight: 700; }
+.clock-chip--running.clock-chip--critical { background: var(--danger); color: var(--on-fill); }
 
 .clock-chip .gift {
   width: 18px;
@@ -317,33 +318,34 @@
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
-  border: 1px solid var(--blue);
+  border: 1px solid var(--accent);
   border-radius: 8px;
   font-size: 0.9rem;
 }
 .offer-banner p { margin: 0; flex: 1; }
 /* `color` is not optional here. Without it these inherit the user agent's
-   button colour — near-black — which sits on `--paper`, and `--paper` is
-   #16181c in dark mode. The result was dark grey text on a dark panel, well
-   under WCAG AA (spec 10.10). Every other button in this file already sets
-   it; this one was the outlier. */
+   button colour — near-black — which sits on `--page`, and every theme but
+   Field Notes has a dark-ish or saturated `--page`. The result was low-
+   contrast text on the panel, under WCAG AA (spec 10.10). Every other button
+   in this file already sets it; this one was the outlier. */
 .offer-banner button {
   border: 1px solid var(--grid);
-  background: var(--paper);
+  background: var(--page);
   color: var(--ink);
   font: inherit;
   border-radius: 6px;
   padding: 0.3rem 0.7rem;
   cursor: pointer;
 }
-.offer-banner button:hover { background: var(--square-alt); }
-.offer-banner button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.offer-banner button:hover { background: var(--panel-alt); }
+.offer-banner button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* No emphasised Accept yet: giving it a blue FILL would put white on
-   `--blue`, and dark mode's `--blue` is a light blue — 2.52:1, a fresh AA
-   failure replacing the one just fixed. Blue text on `--paper` is the version
-   that passes both themes (7.05:1 dark, 4.73:1 light) and needs a class on
-   the button in Game.tsx, so it waits for that file to be free. */
+/* No emphasised Accept yet: giving it an accent FILL risks putting white on
+   too light an accent in some theme — apps/web/test/tokens.test.ts is what
+   would catch that, per theme, rather than a single dark-mode number the way
+   this comment used to reason about it. Accent text on `--page` is the
+   version already proven to pass every theme (theme-tokens.ts) and needs a
+   class on the button in Game.tsx, so it waits for that file to be free. */
 
 
 /* Move list — spec 10.8, in a drawer on a phone (spec 10.11). `<details>`
@@ -362,7 +364,7 @@
   font-weight: 600;
   list-style-position: inside;
 }
-.movelist > summary:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+.movelist > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .movelist-count { color: var(--muted); font-weight: 400; }
 .movelist-empty { margin: 0; padding: 0 0.75rem 0.6rem; color: var(--muted); }
 
@@ -381,7 +383,7 @@
 }
 .movelist-number {
   color: var(--muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   text-align: right;
   padding-right: 0.3rem;
 }
@@ -390,14 +392,14 @@
   background: none;
   color: inherit;
   font: inherit;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   text-align: left;
   padding: 0.15rem 0.35rem;
   border-radius: 4px;
   cursor: pointer;
 }
-.movelist-move:hover { background: var(--square-alt); }
-.movelist-move--on { background: var(--blue); color: var(--on-fill); }
+.movelist-move:hover { background: var(--panel-alt); }
+.movelist-move--on { background: var(--accent); color: var(--on-fill); }
 
 /* Review stepper — spec 10.8's arrows and jump-to-ends, as buttons so the
    feature exists on a touchscreen too, not only under a keyboard. */
@@ -405,7 +407,7 @@
 .review-count {
   min-width: 4.5rem;
   text-align: center;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 0.85rem;
   color: var(--muted);
 }
@@ -454,8 +456,8 @@
 /* The toggle sits in the bar, which is the one thing Zen keeps — so the way
    out is exactly where the way in was. */
 .bar button.zen--on {
-  border-color: var(--blue);
-  color: var(--blue);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 /* A little more air around a board with nothing else competing for it. */

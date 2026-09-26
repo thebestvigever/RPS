@@ -7,6 +7,7 @@ import type { ClockStack, DisplaySettings } from '@sps/match';
 import { LEVELS } from '@sps/ai';
 import type { Level } from '@sps/ai';
 import type { SideNames, ThemeId } from '@sps/board';
+import { applyTheme, loadThemeFonts } from './apply-theme.js';
 import Game from './Game.js';
 import type { Computer } from './Game.js';
 import Online from './Online.js';
@@ -175,6 +176,14 @@ export default function App() {
    * all yet — only Cut stone is built, so there is nothing to pick.
    */
   const [themeId, setThemeId] = useState<ThemeId>(loadThemeId);
+  // main.tsx already applied the saved theme once, synchronously, before
+  // this component ever mounted — this effect is what keeps every later
+  // change (the Settings picker) reaching the same tokens and fonts rather
+  // than just the board.
+  useEffect(() => {
+    applyTheme(themeId);
+    loadThemeFonts(themeId);
+  }, [themeId]);
   const appearance = useMemo(defaultAppearance, []);
   const control = useMemo(() => presetById(controlId), [controlId]);
 

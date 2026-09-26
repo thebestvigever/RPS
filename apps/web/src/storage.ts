@@ -142,9 +142,25 @@ export function clearInProgressGame(): void {
 
 const DEFAULT_THEME: ThemeId = 'field-notes';
 
+/**
+ * docs/VISUAL_SYSTEM.md 4, decision 3: "First launch seeds the theme from
+ * `prefers-color-scheme`, once." A dark OS shouldn't hand a first-time
+ * player a white board; after this one read the stored choice is the only
+ * input, same as every other read in this file. `matchMedia` doesn't exist
+ * in Vitest's Node environment (this module's own header comment), so it's
+ * guarded the same way `window` is guarded elsewhere in this codebase.
+ */
+function seedThemeFromOs(): ThemeId {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return DEFAULT_THEME;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'signal' : DEFAULT_THEME;
+}
+
 export function loadThemeId(): ThemeId {
   const saved = readJSON<ThemeId>(KEYS.theme);
-  return saved && THEME_IDS.includes(saved) ? saved : DEFAULT_THEME;
+  if (saved && THEME_IDS.includes(saved)) return saved;
+  const seeded = seedThemeFromOs();
+  writeJSON(KEYS.theme, seeded); // "persisted immediately" (VISUAL_SYSTEM 4) — after this, only the stored value is read.
+  return seeded;
 }
 
 export function saveThemeId(theme: ThemeId): void {

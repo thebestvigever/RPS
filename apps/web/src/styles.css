@@ -1,52 +1,36 @@
-/* Starting colour tokens from spec 10.3 — which says "adapt freely", and these
-   are adapted. Two of the spec's own values do not clear WCAG AA (10.10) at the
-   sizes this interface uses them, measured with the repo's own `contrastRatio`:
+/* Colour and font tokens. The values below are Field Notes' own resolved
+   tokens (apps/web/src/theme-tokens.ts) — a static fallback for the instant
+   before JS runs, not a second theme. `apply-theme.ts` overwrites every one
+   of these with `document.documentElement.style.setProperty` as soon as
+   main.tsx runs (before React's first render) and again on every Settings
+   change, so in practice a visitor never sees this block resolve on its own.
+   There used to be a second, independent `@media (prefers-color-scheme:
+   dark)` block here — docs/VISUAL_SYSTEM.md 4 already called that out as
+   "a second theming mechanism fighting the first" once themes became
+   explicit tokens, which they now are everywhere, not just on the board.
 
-     white on --red   #d2493c  4.41:1   (a filled button or chip)
-     --alert #b0781c on white  3.78:1   (the "last one" count, the low clock)
-
-   Contrast is symmetric, so darkening each of those by a couple of percent
-   fixes it as a FILL and as TEXT at once, which is why there is no separate
-   fill token: --red and --alert simply became the versions that pass.
-
-     --red   #d2493c -> #ce483b   (2% darker)  4.55:1
-     --alert  b0781c -> #9e6c19  (10% darker)  4.55:1
-
-   The board's own piece colours are NOT these. They come from @sps/board's
-   validated swatches (docs/VISUAL_SYSTEM.md 3), so nothing here moves a piece
-   off its 3:1 floor against the squares. */
+   apps/web/test/tokens.test.ts re-derives every theme's tokens from
+   theme-tokens.ts and checks them against WCAG AA (spec 10.10) — the same
+   discipline packages/board/test/contrast.test.ts already applies to the
+   board's own swatches — so a future palette edit can't quietly break a
+   button's contrast the way this file's own history once did. */
 :root {
-  --blue: #3d6fd6;
-  --red: #ce483b;
-  --alert: #9e6c19;
-  --neutral: #7a7f87;
-  --square: #f4f3ef;
-  --square-alt: #e8e6df;
-  --grid: #2b2b2b;
-  --ink: #1b1b1b;
-  --paper: #ffffff;
-  --muted: #5d6068;
-  /* What sits ON a filled accent. The light theme's accents are dark enough
-     to carry white; the dark theme's are light, so there it is near-black.
-     One token rather than one per accent, because a single foreground clears
-     AA on all three in each theme — see the audit in the commit. */
+  --accent: #2f5aa8;
+  --danger: #b23a2e;
+  --alert: #946518;
+  --panel: #f4f2ec;
+  --panel-alt: #e5e3de;
+  --grid: #cfc9b8;
+  --ink: #1e1e1c;
+  --page: #fbfaf6;
+  --muted: #65625a;
+  /* What sits ON a filled accent/danger/alert. One token rather than one per
+     accent, because a single foreground clears AA on all three per theme —
+     apps/web/src/theme-tokens.ts's own header comment has the audit. */
   --on-fill: #ffffff;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --blue: #7fa3ea;
-    --red: #e8776a;
-    --alert: #b0781c;
-    --neutral: #9aa0a8;
-    --square: #2a2d33;
-    --square-alt: #23262b;
-    --grid: #cfd2d8;
-    --ink: #f2f2f0;
-    --paper: #16181c;
-    --muted: #a3a8b2;
-    --on-fill: #16181c;
-  }
+  --font-body: 'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --font-heading: 'IBM Plex Sans', system-ui, sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -54,20 +38,20 @@
 body {
   margin: 0;
   padding: 2rem 1rem;
-  background: var(--paper);
+  background: var(--page);
   color: var(--ink);
-  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: 16px/1.5 var(--font-body);
 }
 
 /* No horizontal scrolling at 360px (spec 10.11). */
 main { max-width: 42rem; margin: 0 auto; }
 
-h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
+h1 { font-family: var(--font-heading); font-size: 1.5rem; margin: 0 0 0.25rem; }
 
 .sub { color: var(--muted); margin: 0 0 2rem; }
 
 .variant { border: 1px solid var(--grid); border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem; }
-.variant h2 { font-size: 1rem; margin: 0 0 0.25rem; }
+.variant h2 { font-family: var(--font-heading); font-size: 1rem; margin: 0 0 0.25rem; }
 .variant p { margin: 0; color: var(--muted); font-size: 0.9rem; }
 
 /* docs/VISUAL_SYSTEM.md 4/8: the board's own tokens live in @sps/board's
@@ -75,7 +59,7 @@ h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
 .board { margin: 1.5rem 0; max-width: 100%; }
 .board svg { display: block; width: 100%; height: auto; }
 
-.status { border-left: 3px solid var(--blue); padding-left: 1rem; margin-top: 2rem; }
+.status { border-left: 3px solid var(--accent); padding-left: 1rem; margin-top: 2rem; }
 .status p { color: var(--muted); font-size: 0.9rem; }
 
 @media (prefers-reduced-motion: reduce) {
@@ -83,8 +67,8 @@ h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
 }
 
 .variant { cursor: pointer; }
-.variant:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
-.variant--on { border-color: var(--blue); border-width: 2px; }
+.variant:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.variant--on { border-color: var(--accent); border-width: 2px; }
 
 .play {
   display: block;
@@ -93,7 +77,7 @@ h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
   padding: 0.75rem 1rem;
   border: none;
   border-radius: 8px;
-  background: var(--blue);
+  background: var(--accent);
   color: var(--on-fill);
   font: inherit;
   font-weight: 600;
@@ -101,9 +85,9 @@ h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
 }
 /* Hover lifts the button rather than brightening the fill. `brightness()` on
    a filled accent moves it toward its own foreground and quietly eats the
-   contrast this file just bought — in the light theme white on the hovered
-   blue drops below AA. A shadow changes nothing about the colour pair. */
-.play:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 35%, transparent); }
+   contrast this file just bought — a light accent's white text can drop
+   below AA once brightened. A shadow changes nothing about the colour pair. */
+.play:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); }
 .play:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 
 .time-control {
@@ -119,7 +103,7 @@ h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
   padding: 0.3rem 0.5rem;
   border-radius: 6px;
   border: 1px solid var(--grid);
-  background: var(--paper);
+  background: var(--page);
   color: var(--ink);
 }
 .time-control input[type='text'] { width: 10rem; max-width: 50%; }
@@ -136,12 +120,12 @@ h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
   padding: 0.5rem;
   border: 1px solid var(--grid);
   border-radius: 8px;
-  background: var(--paper);
+  background: var(--page);
   color: var(--ink);
   font: inherit;
   cursor: pointer;
 }
-.mode-option--on { border-color: var(--blue); border-width: 2px; font-weight: 600; }
+.mode-option--on { border-color: var(--accent); border-width: 2px; font-weight: 600; }
 
 /* Spec 10.7's local stats, read for whichever variant/difficulty Home has
    picked (App.tsx's own comment on why this is vs-computer only). */
@@ -156,10 +140,10 @@ h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
   padding: 0.6rem 1rem;
   border: 1px solid var(--grid);
   border-radius: 8px;
-  background: var(--paper);
+  background: var(--page);
   color: var(--ink);
   font: inherit;
   cursor: pointer;
 }
-.tutorial-link:hover { background: var(--square-alt); }
-.tutorial-link:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.tutorial-link:hover { background: var(--panel-alt); }
+.tutorial-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
